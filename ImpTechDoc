@@ -1,0 +1,5755 @@
+FISMA Scorecard Metrics – HIVE Implementation Technical Documentation 
+
+ 
+
+​​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​ 
+
+​​ 
+
+ 
+
+Vulnerability Management (VM)  
+
+Requirements & Solution Design 
+
+See: fisma_scorecard_vm_score_solutions.docx  
+
+ 
+
+Implementation  
+
+Device Level VM Score 
+
+Step 0: Input Datasets 
+
+crma_hive.crma_hive_fismascorecard_input_devices: Device inventory for FISMA Scorecard (primarily from Axonius, with credential info from Tenable). 
+
+crma_hive.crma_hive_tvm_vulns: TVM vulnerability findings, including asset and CVE details. 
+
+crma_hive.crma_hive_cve_score_kev_info_combined: Reference table with CVE details, CVSS scores, and KEV (Known Exploited Vulnerabilities) status. 
+
+crma_hive.crma_hive_snow_fismadetails: FISMA system attributes and context. 
+
+ 
+
+Step 1: Select Eligible Devices 
+
+Purpose: Identify devices relevant for VM scoring. 
+
+Action: 
+
+Select devices seen in the current month. 
+
+Filter for devices with roles 'ENDPOINT' or 'NETWORKING DEVICE'. 
+
+ 
+
+Step 2: Extract and Flatten Vulnerabilities 
+
+Purpose: Prepare vulnerability findings for analysis. 
+
+Action: 
+
+Unnest the plugin_cve array to individual CVE records. 
+
+Filter for findings with state 'OPEN' or 'REOPENED'. 
+
+ 
+
+Step 3: Deduplicate Vulnerabilities 
+
+Purpose: Ensure only the latest finding per device/CVE combination is used. 
+
+Action: 
+
+Rank findings by asset and CVE, keeping only the most recent (ROW_NUMBER()). 
+
+Retain only the latest finding for each asset/CVE pair. 
+
+ 
+
+Step 4: Enrich Vulnerabilities with CVE and KEV Data 
+
+Purpose: Add CVSS and KEV context to each vulnerability. 
+
+Action: 
+
+Join deduplicated vulnerabilities with the CVE/KEV reference table. 
+
+Only include CVEs published/modified on or before the 15th of the last calendar month. 
+
+ 
+
+Step 5: Join Devices with Vulnerabilities 
+
+Purpose: Associate eligible devices with their enriched vulnerabilities. 
+
+Action: 
+
+Left join eligible devices with enriched vulnerabilities on asset ID. 
+
+ 
+
+Step 6: Aggregate Per Device 
+
+Purpose: Summarize vulnerability counts and KEV status per device. 
+
+Action: 
+
+For each device, calculate: 
+
+High CVE count (CVSS 7.0–8.9) 
+
+Critical CVE count (CVSS 9.0–10.0) 
+
+List of high and critical CVEs 
+
+List of eligible KEV CVEs (KEV and added before cutoff date) 
+
+Boolean flag for presence of eligible KEV 
+
+Aggregate finding IDs 
+
+ 
+
+Step 7: Compute Device VM Score 
+
+Purpose: Assign a VM score to each device based on vulnerability posture. 
+
+Action: 
+
+ 
+
+ 
+
+ 
+
+If device is not credentialed or has any eligible KEV, assign score 0. 
+
+Otherwise, calculate: 
+100 - (LEAST(critical_cve_count * 10, 50) + LEAST(high_cve_count * 5, 50)), with a minimum of 0. 
+
+ 
+
+Step 8: Enrich with FISMA Details 
+
+Purpose: Add FISMA system context to each device’s VM score. 
+
+Action: 
+
+Join device scores with FISMA system details. 
+
+ 
+
+Step 9: Final Output 
+
+Purpose: Produce a comprehensive, enriched device-level VM score report. 
+
+Action: 
+
+Select and present enriched device-level VM scores and relevant FISMA attributes. 
+
+Output Table: 
+crma_hive.crma_hive_fismascorecard_device_vm_score 
+
+Updated daily 
+
+Daily scores are appended to the table with ETL dates 
+
+ 
+
+FISMA SYSTEM Level VM Score 
+
+Step 0: Input Datasets 
+
+crma_hive.crma_hive_fismascorecard_device_vm_score: Device-level VM scores. 
+
+crma_hive.crma_hive_snow_fismadetails: FISMA system attributes. 
+
+ 
+
+Step 1: Calculate FISMA-Level VM Score 
+
+Purpose: Compute the average VM score for each FISMA system. 
+
+Action: 
+
+Aggregate device-level VM scores by FISMA ID. 
+
+Calculate the average VM score for each FISMA system (rounded to nearest integer). 
+
+ 
+
+Step 2: Enrich FISMA VM Scores with System Details 
+
+Purpose: Add FISMA system context to each VM score for reporting. 
+
+Action: 
+
+Join FISMA VM scores with FISMA system details. 
+
+Select relevant FISMA attributes for the final output. 
+
+Output Table: 
+crma_hive.crma_hive_fismascorecard_fisma_system_vm_score 
+
+Updated daily 
+
+Daily scores are appended to the table with ETL dates 
+
+SQL Scripts 
+
+Device Level scoring 
+
+WITH  
+
+-- Step 1: Select Eligible devices 
+
+eligible_devices AS ( 
+
+    SELECT  
+
+        device_id, 
+
+        fisma_id, 
+
+        preferred_hostname AS hostname,  
+
+        preferred_ipv4  AS ip, 
+
+        devicerole, 
+
+        device_last_seen, 
+
+        asset_id, 
+
+        is_credentialed, 
+
+        last_authenticated_scan_date 
+
+    FROM  crma_hive.crma_hive_fismascorecard_input_devices  
+
+    WHERE device_last_seen >= %(current_month_start)s 
+
+    AND devicerole IN ('ENDPOINT','NETWORKING DEVICE') 
+
+), 
+
+-- Step 2: Dedup asset_id  
+
+        -- group by asset_id -> rank by device_last_seen, keep top ranked 
+
+deduped_eligible_devices AS(     
+
+    SELECT * 
+
+    FROM ( 
+
+        SELECT *, 
+
+            ROW_NUMBER() OVER ( 
+
+                PARTITION BY asset_id 
+
+                ORDER BY device_last_seen DESC 
+
+            ) AS asset_rn 
+
+        FROM eligible_devices 
+
+        WHERE asset_id IS NOT NULL 
+
+    ) ranked 
+
+    WHERE asset_rn = 1  
+
+    UNION ALL 
+
+    SELECT *, 
+
+        NULL AS asset_rn 
+
+    FROM eligible_devices 
+
+    WHERE asset_id IS NULL 
+
+), 
+
+-- Step 3: Get eligibile scans 
+
+flattened_vulns AS ( 
+
+    -- 3.1: Flatten 
+
+    SELECT 
+
+        v.finding_id, 
+
+        v.asset_uuid AS asset_id, 
+
+        v.last_found, 
+
+        v.state, 
+
+        TRIM(cve) AS cve_id 
+
+    FROM crma_hive.crma_hive_tvm_vulns v 
+
+    CROSS JOIN LATERAL UNNEST(v.plugin_cve) AS cve 
+
+    WHERE 
+
+        v.plugin_cve IS NOT NULL 
+
+        AND array_length(v.plugin_cve, 1) > 0 
+
+        AND v.state IN ('OPEN', 'REOPENED') 
+
+), 
+
+ranked_vulns AS ( 
+
+    -- 3.2: Flatten  
+
+    SELECT 
+
+        finding_id, 
+
+        asset_id, 
+
+        last_found, 
+
+        state, 
+
+        cve_id, 
+
+        ROW_NUMBER() OVER ( 
+
+            PARTITION BY asset_id, cve_id 
+
+            ORDER BY last_found DESC 
+
+        ) AS rn 
+
+    FROM flattened_vulns 
+
+), 
+
+latest_vulns AS ( 
+
+    -- 3.3: Dedup: Keep latest in case of duplicate asset_uuid&cve combination 
+
+    SELECT 
+
+        finding_id, 
+
+        asset_id, 
+
+        last_found, 
+
+        state, 
+
+        cve_id 
+
+    FROM ranked_vulns 
+
+    WHERE rn = 1 
+
+), 
+
+-- Step 4: Enrich vulns with CVE NVD/KEV data 
+
+        -- Where cve published date is on/before 15th of last calander month 
+
+enriched_vulns AS ( 
+
+    SELECT 
+
+        lv.finding_id, 
+
+        lv.asset_id, 
+
+        lv.last_found, 
+
+        lv.state, 
+
+        lv.cve_id, 
+
+        ck.cvss_v3_score, 
+
+        ck.published     AS cve_published_date, 
+
+        ck.last_modified AS cve_last_modified_date, 
+
+        ck.is_kev, 
+
+        ck.date_added AS kev_date_added, 
+
+        ck.due_date AS kev_due_date 
+
+    FROM latest_vulns lv 
+
+    LEFT JOIN crma_hive.crma_hive_cve_score_kev_info_combined ck 
+
+        ON lv.cve_id = ck.cve_id 
+
+    WHERE ck.published  <= %(cve_kev_cutoff_date)s 
+
+), 
+
+-- Step 5: Left Join eligibile_devices and enriched_vulns  on asset_uuid  
+
+eligible_devices_cves AS ( 
+
+    SELECT 
+
+        ed.device_id, 
+
+        ed.fisma_id, 
+
+        ed.hostname, 
+
+        ed.ip, 
+
+        ed.devicerole, 
+
+        ed.asset_id, 
+
+        ed.device_last_seen, 
+
+        ed.is_credentialed, 
+
+        ed.last_authenticated_scan_date, 
+
+        ev.finding_id, 
+
+        ev.state                 AS finding_state, 
+
+        ev.cve_id, 
+
+        ev.cvss_v3_score, 
+
+        ev.cve_published_date, 
+
+        ev.cve_last_modified_date, 
+
+        ev.is_kev, 
+
+        ev.kev_date_added, 
+
+        ev.kev_due_date 
+
+    FROM deduped_eligible_devices ed 
+
+    LEFT JOIN enriched_vulns  ev 
+
+        ON ed.asset_id = ev.asset_id 
+
+), 
+
+-- Step 6: compute per device aggregates  
+
+per_device_aggs AS ( 
+
+    SELECT 
+
+        device_id, 
+
+        MAX(hostname) AS hostname, 
+
+        MAX(ip)  As ip, 
+
+        MAX(asset_id) AS asset_id, 
+
+        MAX(fisma_id) AS fisma_id, 
+
+        MAX(device_last_seen) AS device_last_seen,   
+
+        COALESCE(BOOL_OR(is_credentialed), FALSE) AS is_credentialed, 
+
+        MAX(last_authenticated_scan_date) AS last_authenticated_scan_date, 
+
+        COALESCE( 
+
+            BOOL_OR(is_kev AND kev_date_added <= %(cve_kev_cutoff_date)s), 
+
+            FALSE 
+
+        ) AS has_eligible_kev, 
+
+     
+
+        COUNT(*) FILTER ( 
+
+            WHERE is_kev = TRUE AND kev_date_added <= %(cve_kev_cutoff_date)s 
+
+        ) AS eligible_kev_cve_count, 
+
+ 
+
+        SUM( 
+
+            CASE 
+
+                WHEN cvss_v3_score BETWEEN 7.0 AND 8.9 THEN 1 
+
+                ELSE 0 
+
+            END 
+
+        ) AS high_cve_count, 
+
+        SUM( 
+
+            CASE 
+
+                WHEN cvss_v3_score BETWEEN 9.0 AND 10.0 THEN 1 
+
+                ELSE 0 
+
+            END 
+
+        ) AS critical_cve_count,  
+
+ 
+
+        ARRAY_AGG(cve_id) FILTER (WHERE cvss_v3_score BETWEEN 7.0 AND 8.9) AS high_cves, 
+
+ 
+
+        ARRAY_AGG(cve_id) FILTER (WHERE cvss_v3_score BETWEEN 9.0 AND 10.0) AS critical_cves, 
+
+ 
+
+        ARRAY_AGG(cve_id) FILTER (WHERE is_kev AND kev_date_added <= %(cve_kev_cutoff_date)s) AS eligible_kev_cves, 
+
+ 
+
+ 
+
+        ARRAY_AGG(finding_id) FILTER (WHERE finding_id IS NOT NULL) AS finding_ids 
+
+ 
+
+    FROM eligible_devices_cves 
+
+    GROUP BY device_id 
+
+), 
+
+-- Step 7: Compute Device VM Score 
+
+device_vm_scores AS ( 
+
+    SELECT  
+
+        device_id, 
+
+        hostname, 
+
+        ip, 
+
+        asset_id, 
+
+        fisma_id, 
+
+        device_last_seen, 
+
+        is_credentialed, 
+
+        last_authenticated_scan_date, 
+
+        has_eligible_kev, 
+
+        high_cve_count, 
+
+        eligible_kev_cve_count, 
+
+        critical_cve_count, 
+
+        high_cves, 
+
+        critical_cves, 
+
+        eligible_kev_cves, 
+
+        finding_ids, 
+
+        CASE 
+
+            WHEN NOT is_credentialed OR has_eligible_kev THEN 0 
+
+            ELSE GREATEST( 
+
+                100 - (LEAST(critical_cve_count * 10, 50) + LEAST(high_cve_count * 5, 50)), 
+
+                0 
+
+            ) 
+
+        END AS vm_score 
+
+    FROM per_device_aggs 
+
+), 
+
+-- Step 8: Enrich with FISMA system information 
+
+device_vm_scores_enriched AS ( 
+
+    SELECT  
+
+        dvs.device_id, 
+
+        dvs.hostname, 
+
+        dvs.ip, 
+
+        dvs.fisma_id, 
+
+        fd.fisma_name, 
+
+        fd.security_support_portfolio AS portfolio, 
+
+        fd.dhs_hva, 
+
+        fd.public_facing, 
+
+        fd.cfo_designated, 
+
+        fd.fips_199_security_categorization_overall, 
+
+        fd.active, 
+
+        fd.iscm_waiver,  
+
+        fd.fisma_reportable, 
+
+        fd.fisma_inventory_selc_status, 
+
+        fd.fisma_category, 
+
+        dvs.device_last_seen, 
+
+        dvs.asset_id, 
+
+        dvs.is_credentialed, 
+
+        dvs.last_authenticated_scan_date, 
+
+        dvs.has_eligible_kev, 
+
+        dvs.eligible_kev_cve_count, 
+
+        dvs.eligible_kev_cves, 
+
+        dvs.high_cves, 
+
+        dvs.high_cve_count, 
+
+        dvs.critical_cves, 
+
+        dvs.critical_cve_count,  
+
+        dvs.finding_ids, 
+
+        dvs.vm_score      
+
+    FROM device_vm_scores dvs 
+
+    LEFT JOIN crma_hive.crma_hive_snow_fismadetails fd 
+
+        ON dvs.fisma_id = fd.fisma_id 
+
+) 
+
+ 
+
+SELECT  
+
+    device_id, 
+
+    hostname, 
+
+    ip, 
+
+    fisma_id, 
+
+    fisma_name, 
+
+    portfolio, 
+
+    dhs_hva, 
+
+    public_facing, 
+
+    cfo_designated, 
+
+    fips_199_security_categorization_overall, 
+
+    active, 
+
+    iscm_waiver,  
+
+    fisma_reportable, 
+
+    fisma_inventory_selc_status, 
+
+    fisma_category, 
+
+    device_last_seen, 
+
+    asset_id, 
+
+    is_credentialed, 
+
+    last_authenticated_scan_date, 
+
+    has_eligible_kev, 
+
+    eligible_kev_cve_count, 
+
+    eligible_kev_cves, 
+
+    high_cves, 
+
+    high_cve_count, 
+
+    critical_cves, 
+
+    critical_cve_count,  
+
+    finding_ids, 
+
+    vm_score  
+
+FROM device_vm_scores_enriched 
+
+ 
+
+ 
+
+ 
+
+FISMA Level scoring 
+
+WITH 
+
+fisma_vm_score AS ( 
+
+    SELECT  
+
+        fisma_id, 
+
+        ROUND(AVG(vm_score))::integer AS vm_score 
+
+    FROM crma_hive.crma_hive_fismascorecard_device_vm_score   
+
+    WHERE etl_date = %(etl_date)s 
+
+    GROUP BY fisma_id 
+
+) 
+
+SELECT  
+
+    a.fisma_id, 
+
+    a.fisma_name, 
+
+    a.security_support_portfolio AS portfolio, 
+
+    a.dhs_hva, 
+
+    a.public_facing, 
+
+    a.cfo_designated, 
+
+    a.fips_199_security_categorization_overall, 
+
+    a.active, 
+
+    a.iscm_waiver, 
+
+    a.fisma_reportable, 
+
+    a.fisma_inventory_selc_status, 
+
+    a.fisma_catagory, 
+
+    b.vm_score 
+
+FROM crma_hive.crma_hive_snow_fismadetails a 
+
+LEFT JOIN fisma_vm_score b 
+
+    ON a.fisma_id = b.fisma_id 
+
+ 
+
+Configuration Management (CM) 
+
+Requirements & Solution Design 
+
+See:fisma_scorecard_cm_score_solutions.docx 
+
+Implementation 
+
+Device Leve CM Score 
+
+Step 0: Input Datasets 
+
+crma_hive.crma_hive_tvm_compliance: TVM compliance scan results, including audit file, rule, and status. 
+
+crma_hive.crma_hive_fismascorecard_input_devices: Device inventory for FISMA Scorecard (primarily from Axonius, with credential info from Tenable). 
+
+crma_hive.crma_hive_sscg_os_version_to_tvm_audit_file_map: Reference table mapping audit files to OS versions. 
+
+crma_hive.crma_hive_sscg_disa_csm: Reference checklist mapping OS versions to DISA STIG rules and severity. 
+
+crma_hive.crma_hive_snow_fismadetails: FISMA system attributes and context. 
+
+ 
+
+Step 1: Identify Current Month Compliance Scans 
+
+Purpose: Filter compliance scan results to only those from the current month. 
+
+Action: 
+
+Select scans with last_seen date in the current month. 
+
+ 
+
+Step 2: Select Latest and Most Complete Audit File per Asset 
+
+Purpose: Ensure each asset uses the most recent and comprehensive audit file. 
+
+Action: 
+
+Count scan records per audit file and asset. 
+
+Rank audit files by recency and completeness. 
+
+Select the top audit file per asset. 
+
+ 
+
+Step 3: Identify Eligible Devices 
+
+Purpose: Filter for devices relevant for CM scoring. 
+
+Action: 
+
+Join device inventory with selected audit files. 
+
+Filter for devices seen in the current month and with role 'ENDPOINT'. 
+
+ 
+
+Step 4: Map Device Scans to Reference Audit Files 
+
+Purpose: Link device audit files to reference OS versions. 
+
+Action: 
+
+Join eligible devices to audit file mapping table. 
+
+Only include devices with a mapped reference OS version. 
+
+ 
+
+Step 5: Join Mapped Scans to Reference Checklist 
+
+Purpose: Associate device scans with expected checklist rules. 
+
+Action: 
+
+Join mapped devices to checklist table by reference OS version. 
+
+Filter for rules required for scorecard and severity levels I, II, III. 
+
+ 
+
+Step 6: Match Actual Scan Outcomes to Expected Checks 
+
+Purpose: Compare device scan results to expected checklist rules. 
+
+Action: 
+
+Join reference checklist with actual scan results by asset, audit file, and rule. 
+
+Only include records where scan rule ID is present. 
+
+ 
+
+Step 7: Standardize Status and Pass Flags 
+
+Purpose: Normalize scan status and flag pass/fail results. 
+
+Action: 
+
+Standardize status as 'Pass', 'Fail', or 'Not Evaluated'. 
+
+Flag as pass (1) if status is 'Pass', otherwise 0. 
+
+ 
+
+Step 8: Aggregate Device Rule Results 
+
+Purpose: Summarize expected and passed rules per device by severity. 
+
+Action: 
+
+Count expected and passed rules for severity categories I, II, III. 
+
+ 
+
+Step 9: Calculate Device CM Score 
+
+Purpose: Assign a CM score to each device based on compliance posture. 
+
+Action: 
+
+If device is credentialed, calculate score as: 
+
+Cat I: (passed_cat1 / expected_cat1) * 50 (or 1 if expected_cat1 = 0) 
+
+Cat II: (passed_cat2 / expected_cat2) * 30 (or 1 if expected_cat2 = 0) 
+
+Cat III: (passed_cat3 / expected_cat3) * 20 (or 1 if expected_cat3 = 0) 
+
+Sum and round to integer. 
+
+If device is not credentialed, assign score 0. 
+
+ 
+
+Step 10: Enrich with FISMA Details 
+
+Purpose: Add FISMA system context to each device’s CM score. 
+
+Action: 
+
+Join device scores with FISMA system details. 
+
+ 
+
+Step 11: Final Output 
+
+Purpose: Produce a comprehensive, enriched device-level CM score report. 
+
+Action: 
+
+Select and present enriched device-level CM scores and relevant FISMA attributes. 
+
+Output Table: 
+crma_hive.crma_hive_fismascorecard_device_cm_score 
+
+Updated daily 
+
+Daily scores are appended to the table with ETL dates 
+
+ 
+
+FISMA SYSTEM Level CM Score 
+
+Step 0: Input Datasets 
+
+crma_hive.crma_hive_fismascorecard_device_cm_score: Device-level CM scores. 
+
+crma_hive.crma_hive_snow_fismadetails: FISMA system attributes. 
+
+ 
+
+Step 1: Calculate FISMA-Level CM Score 
+
+Purpose: Compute the average CM score for each FISMA system. 
+
+Action: 
+
+Aggregate device-level CM scores by FISMA ID. 
+
+Calculate the average CM score for each FISMA system (rounded to nearest integer). 
+
+ 
+
+Step 2: Enrich FISMA CM Scores with System Details 
+
+Purpose: Add FISMA system context to each CM score for reporting. 
+
+Action: 
+
+Join FISMA CM scores with FISMA system details. 
+
+Select relevant FISMA attributes for the final output. 
+
+Output Table: 
+crma_hive.crma_hive_fismascorecard_fisma_system_cm_score 
+
+Updated daily 
+
+Daily scores are appended to the table with ETL dates 
+
+ 
+
+ 
+
+SQL queries 
+
+Device Level Scoring 
+
+WITH           
+
+current_month_compliance_scans AS ( 
+
+    -- Step 1.1 Filter compliance scans for current month 
+
+    SELECT 
+
+        asset_id, 
+
+        last_seen AS asset_last_seen, 
+
+        audit_file, 
+
+        rule_id, 
+
+        status, 
+
+        reference 
+
+    FROM crma_hive.crma_hive_tvm_compliance 
+
+    WHERE last_seen >= %(current_month_start)s 
+
+),         
+
+audit_files AS ( 
+
+    -- Step 1.2: Identify latest and most complete audit file per asset 
+
+    SELECT asset_id, asset_last_seen, audit_file, COUNT(*) AS audit_file_count 
+
+    FROM current_month_compliance_scans 
+
+    GROUP BY asset_id, asset_last_seen, audit_file 
+
+), 
+
+selected_audit_file AS ( 
+
+    -- Step 1.3: Select top audit file per asset based on recency and completeness 
+
+    SELECT  
+
+        asset_id, 
+
+        asset_last_seen, 
+
+        audit_file 
+
+    FROM ( 
+
+        SELECT 
+
+            asset_id, 
+
+            audit_file, 
+
+            asset_last_seen,         
+
+            audit_file_count, 
+
+            ROW_NUMBER() OVER ( 
+
+                PARTITION BY asset_id 
+
+                ORDER BY asset_last_seen DESC, audit_file_count DESC, audit_file 
+
+            ) AS rn 
+
+        FROM audit_files 
+
+    ) af 
+
+    WHERE rn = 1 
+
+), 
+
+-- Step 2: Identify eligible devices  
+
+eligible_devices AS ( 
+
+    SELECT 
+
+        dev.device_id, 
+
+        dev.preferred_hostname AS hostname,  
+
+        dev.preferred_ipv4  AS ip, 
+
+        dev.fisma_id, 
+
+        dev.devicerole, 
+
+        dev.device_last_seen, 
+
+        dev.asset_id, 
+
+        dev.is_credentialed, 
+
+        dev.last_authenticated_scan_date, 
+
+        scan.audit_file, 
+
+        scan.asset_last_seen 
+
+    FROM crma_hive.crma_hive_fismascorecard_input_devices dev 
+
+    INNER JOIN selected_audit_file scan   
+
+        ON dev.asset_id = scan.asset_id 
+
+    WHERE dev.device_last_seen >= %(current_month_start)s 
+
+        AND dev.devicerole = 'ENDPOINT' 
+
+), 
+
+-- Step 3: Dedup asset_id  
+
+        -- group by asset_id -> rank by device_last_seen, keep top ranked 
+
+deduped_eligible_devices AS(     
+
+    SELECT * 
+
+    FROM ( 
+
+        SELECT *, 
+
+            ROW_NUMBER() OVER ( 
+
+                PARTITION BY asset_id 
+
+                ORDER BY device_last_seen DESC 
+
+            ) AS asset_rn 
+
+        FROM eligible_devices 
+
+        WHERE asset_id IS NOT NULL 
+
+    ) ranked 
+
+    WHERE asset_rn = 1  
+
+    UNION ALL 
+
+    SELECT *, 
+
+        NULL AS asset_rn 
+
+    FROM eligible_devices 
+
+    WHERE asset_id IS NULL 
+
+),         
+
+-- Step 4: Map eligible device scans to reference audit files 
+
+scan_audit_mapping AS ( 
+
+    SELECT 
+
+        ed.device_id, 
+
+        ed.hostname, 
+
+        ed.ip, 
+
+        ed.fisma_id, 
+
+        ed.device_last_seen, 
+
+        ed.asset_id, 
+
+        ed.asset_last_seen, 
+
+        ed.is_credentialed, 
+
+        ed.last_authenticated_scan_date, 
+
+        ed.audit_file AS compliance_audit_file, 
+
+        map.sscg_os_version AS reference_audit_file 
+
+    FROM deduped_eligible_devices ed 
+
+    LEFT JOIN crma_hive.crma_hive_sscg_os_version_to_tvm_audit_file_map map 
+
+    ON ed.audit_file = map.audit_file 
+
+    WHERE map.sscg_os_version IS NOT NULL 
+
+), 
+
+-- Step 5: Join mapped scans to reference checklist 
+
+reference_checklist AS ( 
+
+    SELECT  
+
+        sam.device_id, 
+
+        sam.hostname, 
+
+        sam.ip, 
+
+        sam.fisma_id, 
+
+        sam.device_last_seen, 
+
+        sam.asset_id, 
+
+        sam.asset_last_seen, 
+
+        sam.is_credentialed, 
+
+        sam.last_authenticated_scan_date, 
+
+        sam.compliance_audit_file, 
+
+        sam.reference_audit_file, 
+
+        chk.rule_id, 
+
+        chk.stig_id, 
+
+        chk.severity, 
+
+        chk.scorecard 
+
+    FROM scan_audit_mapping sam 
+
+    LEFT JOIN crma_hive.crma_hive_sscg_disa_csm chk 
+
+    ON sam.reference_audit_file = chk.os_version 
+
+    WHERE chk.scorecard = 'Required for Scorecard' 
+
+        AND chk.severity IN ('I', 'II', 'III') 
+
+), 
+
+-- Step 6: Match actual scan outcomes to expected checks 
+
+checklist_scan_results AS ( 
+
+    SELECT 
+
+        rc.device_id, 
+
+        rc.hostname, 
+
+        rc.ip, 
+
+        rc.fisma_id, 
+
+        rc.device_last_seen, 
+
+        rc.asset_id, 
+
+        rc.asset_last_seen, 
+
+        rc.is_credentialed, 
+
+        rc.last_authenticated_scan_date, 
+
+        rc.compliance_audit_file, 
+
+        rc.reference_audit_file, 
+
+        rc.rule_id AS reference_rule_id, 
+
+        scan.rule_id AS compliance_rule_id, 
+
+        rc.stig_id, 
+
+        rc.severity, 
+
+        rc.scorecard, 
+
+        scan.status, 
+
+        scan.reference 
+
+    FROM reference_checklist rc 
+
+    LEFT JOIN current_month_compliance_scans scan 
+
+    ON scan.asset_id   = rc.asset_id 
+
+        AND scan.asset_last_seen  = rc.asset_last_seen 
+
+        AND scan.audit_file = rc.compliance_audit_file 
+
+        AND scan.rule_id    = rc.rule_id 
+
+    WHERE scan.rule_id IS NOT NULL   
+
+), 
+
+-- Step 7: Add standardized status and pass flags 
+
+scan_status_flags AS ( 
+
+    SELECT 
+
+        csr.device_id, 
+
+        csr.hostname, 
+
+        csr.ip, 
+
+        csr.fisma_id, 
+
+        csr.device_last_seen, 
+
+        csr.asset_id, 
+
+        csr.is_credentialed, 
+
+        csr.last_authenticated_scan_date, 
+
+        csr.compliance_audit_file, 
+
+        csr.reference_audit_file, 
+
+        csr.reference_rule_id, 
+
+        csr.compliance_rule_id, 
+
+        csr.stig_id, 
+
+        csr.severity, 
+
+        csr.scorecard, 
+
+        CASE 
+
+            WHEN csr.status ILIKE 'pass%%' THEN 'Pass' 
+
+            WHEN csr.status ILIKE 'fail%%' THEN 'Fail' 
+
+            ELSE 'Not Evaluated' 
+
+        END AS standardized_status, 
+
+        CASE 
+
+            WHEN csr.status ILIKE 'pass%%' THEN 1 ELSE 0 
+
+        END AS is_pass, 
+
+        CASE 
+
+            WHEN csr.status ILIKE 'fail%%' THEN 1 ELSE 0 
+
+        END AS is_fail, 
+
+        CASE 
+
+            WHEN csr.status ILIKE 'Not Evaluated%%' THEN 1 ELSE 0 
+
+        END AS not_evaluated 
+
+    FROM checklist_scan_results csr 
+
+), 
+
+-- Step 8: Aggregate device rule results 
+
+device_rule_summary AS ( 
+
+    SELECT 
+
+        device_id, 
+
+        MAX(hostname) AS hostname, 
+
+        MAX(ip)  As ip, 
+
+        MAX(fisma_id) AS fisma_id, 
+
+        asset_id, 
+
+        MAX(device_last_seen) AS device_last_seen, 
+
+        MAX(compliance_audit_file) AS compliance_audit_file, 
+
+        MAX(reference_audit_file) AS reference_audit_file, 
+
+        BOOL_OR(is_credentialed) AS is_credentialed, 
+
+        MAX(last_authenticated_scan_date) AS last_authenticated_scan_date, 
+
+        COUNT(*) FILTER (WHERE severity ='I') AS expected_cat1, 
+
+        COUNT(*) FILTER (WHERE severity= 'II') AS expected_cat2, 
+
+        COUNT(*) FILTER (WHERE severity = 'III') AS expected_cat3, 
+
+        COUNT(*) FILTER (WHERE severity = 'I' AND is_pass = 1) AS passed_cat1, 
+
+        COUNT(*) FILTER (WHERE severity = 'II' AND is_pass = 1) AS passed_cat2, 
+
+        COUNT(*) FILTER (WHERE severity = 'III' AND is_pass = 1) AS passed_cat3, 
+
+        COUNT(*) FILTER (WHERE severity = 'I' AND is_fail = 1) AS failed_cat1, 
+
+        COUNT(*) FILTER (WHERE severity = 'II' AND is_fail = 1) AS failed_cat2, 
+
+        COUNT(*) FILTER (WHERE severity = 'III' AND is_fail = 1) AS failed_cat3, 
+
+        COUNT(*) FILTER (WHERE severity = 'I' AND not_evaluated = 1) AS not_evaluated_cat1, 
+
+        COUNT(*) FILTER (WHERE severity = 'II' AND not_evaluated = 1) AS not_evaluated_cat2, 
+
+        COUNT(*) FILTER (WHERE severity = 'III' AND not_evaluated = 1) AS not_evaluated_cat3 
+
+    FROM scan_status_flags 
+
+    GROUP BY device_id, asset_id 
+
+), 
+
+-- Step 9: Calculate Configuration Management (CM) Score 
+
+device_cm_scores AS ( 
+
+    SELECT 
+
+        *, 
+
+        CASE 
+
+            WHEN is_credentialed = TRUE THEN 
+
+                ( 
+
+                    CASE WHEN expected_cat1 = 0 THEN 1 ELSE passed_cat1::numeric / expected_cat1::numeric END * 50 
+
+                + CASE WHEN expected_cat2 = 0 THEN 1 ELSE passed_cat2::numeric / expected_cat2::numeric END * 30 
+
+                + CASE WHEN expected_cat3 = 0 THEN 1 ELSE passed_cat3::numeric / expected_cat3::numeric END * 20 
+
+                )::int 
+
+            ELSE 0 
+
+        END AS cm_score 
+
+    FROM device_rule_summary 
+
+), 
+
+-- Step 10: Enrich with FISMA system information 
+
+device_cm_scores_enriched AS ( 
+
+    SELECT  
+
+        dcs.device_id, 
+
+        dcs.hostname, 
+
+        dcs.ip, 
+
+        dcs.fisma_id, 
+
+        fd.fisma_name, 
+
+        fd.security_support_portfolio AS portfolio, 
+
+        fd.dhs_hva, 
+
+        fd.public_facing, 
+
+        fd.cfo_designated, 
+
+        fd.fips_199_security_categorization_overall, 
+
+        fd.active, 
+
+        fd.iscm_waiver,  
+
+        fd.fisma_reportable, 
+
+        fd.fisma_inventory_selc_status, 
+
+        fd.fisma_category, 
+
+        dcs.asset_id, 
+
+        dcs.device_last_seen, 
+
+        dcs.compliance_audit_file, 
+
+        dcs.reference_audit_file, 
+
+        dcs.is_credentialed, 
+
+        dcs.last_authenticated_scan_date, 
+
+        dcs.expected_cat1, 
+
+        dcs.expected_cat2, 
+
+        dcs.expected_cat3, 
+
+        dcs.passed_cat1, 
+
+        dcs.passed_cat2, 
+
+        dcs.passed_cat3, 
+
+        dcs.failed_cat1, 
+
+        dcs.failed_cat2, 
+
+        dcs.failed_cat3, 
+
+        dcs.not_evaluated_cat1, 
+
+        dcs.not_evaluated_cat2, 
+
+        dcs.not_evaluated_cat3, 
+
+        dcs.cm_score      
+
+    FROM device_cm_scores dcs 
+
+    LEFT JOIN crma_hive.crma_hive_snow_fismadetails fd 
+
+        ON dcs.fisma_id = fd.fisma_id 
+
+) 
+
+ 
+
+SELECT  
+
+    device_id, 
+
+    hostname, 
+
+    ip, 
+
+    fisma_id, 
+
+    fisma_name, 
+
+    portfolio, 
+
+    dhs_hva, 
+
+    public_facing, 
+
+    cfo_designated, 
+
+    fips_199_security_categorization_overall, 
+
+    active, 
+
+    iscm_waiver,  
+
+    fisma_reportable, 
+
+    fisma_inventory_selc_status, 
+
+    fisma_category, 
+
+    device_last_seen, 
+
+    asset_id, 
+
+    compliance_audit_file, 
+
+    reference_audit_file, 
+
+    is_credentialed, 
+
+    last_authenticated_scan_date, 
+
+    expected_cat1, 
+
+    expected_cat2, 
+
+    expected_cat3, 
+
+    passed_cat1, 
+
+    passed_cat2, 
+
+    passed_cat3, 
+
+    failed_cat1, 
+
+    failed_cat2, 
+
+    failed_cat3, 
+
+    not_evaluated_cat1, 
+
+    not_evaluated_cat2, 
+
+    not_evaluated_cat3, 
+
+    cm_score  
+
+FROM device_cm_scores_enriched 
+
+ 
+
+ 
+
+FISMA Level Scoring  
+
+WITH  
+
+fisma_cm_score AS ( 
+
+    SELECT 
+
+        fisma_id, 
+
+        ROUND(AVG(cm_score))::integer AS  cm_score 
+
+    FROM crma_hive.crma_hive_fismascorecard_device_cm_score 
+
+    WHERE etl_date = %(etl_date)s 
+
+    GROUP BY fisma_id 
+
+) 
+
+SELECT  
+
+    a.fisma_id, 
+
+    a.fisma_name, 
+
+    a.security_support_portfolio AS portfolio, 
+
+    a.dhs_hva, 
+
+    a.public_facing, 
+
+    a.cfo_designated, 
+
+    a.fips_199_security_categorization_overall, 
+
+    a.active, 
+
+    a.iscm_waiver, 
+
+    a.fisma_reportable, 
+
+    a.fisma_inventory_selc_status, 
+
+    a.fisma_catagory, 
+
+    b.cm_score 
+
+FROM crma_hive.crma_hive_snow_fismadetails a 
+
+LEFT JOIN fisma_cm_score b 
+
+    ON a.fisma_id = b.fisma_id 
+
+ 
+
+ 
+
+Software Asset Management (SWAM) 
+
+Requirements & Solution Design 
+
+See: fisma_scorecard_swam_score_solutions.docx 
+
+Implementation  
+
+Device Level SWAM Score 
+
+Step 0: Input Datasets 
+
+crma_hive.crma_hive_tvm_normalized_softwares: TVM normalized software inventory. 
+
+crma_hive.crma_hive_tvm_to_mobius_software_map: Reference table for mapping between TVM and Mobius software names. 
+
+crma_hive.crma_hive_mobius_normalized_softwares: Mobius normalized software inventory. 
+
+crma_hive.crma_hive_fismascorecard_input_devices: Device inventory for FISMA Scorecard (primarily from Axonius, with credential info from Tenable). 
+
+crma_hive.crma_hive_snow_fismadetails: FISMA system attributes and context. 
+
+ 
+
+Step 1: Partial Software Match 
+
+Purpose: Identify possible matches between TVM and Mobius software by name. 
+
+Action: 
+
+Join TVM normalized software to Mobius reference map using software name. 
+
+Filter for assets seen in the current month. 
+
+ 
+
+Step 2: Full Software Match 
+
+Purpose: Confirm matches by comparing both software name and version. 
+
+Action: 
+
+Join the partially matched data from Step 1 with Mobius normalized software on name and version to create a full match. 
+
+ 
+
+Step 3: Identify Eligible Devices 
+
+Purpose: Filter for relevant devices (endpoints, credentialed, recently seen) with matched software. 
+
+Action: 
+
+Join device inventory to matched software data. 
+
+Filter for devices seen in the current month. 
+
+Select devices with role 'ENDPOINT' and credentialed status TRUE. 
+
+ 
+
+Step 4: Remove Exclude List Softwares 
+
+Purpose: Remove records with software that appear in Tenable due to legacy DLLs. 
+
+Action: 
+
+Filter out records where software is in a predefined exclude list. 
+
+Step 5: Standardize Software Status 
+
+Purpose: Normalize the software status field to consistently flag prohibited software. 
+
+Action: 
+
+Standardize software status values. 
+
+Flag software as 'Prohibited' if status is 'Prohibited' or 'Not Authorized'. 
+
+ 
+
+Step 6: Aggregate Per Device 
+
+Purpose: Summarize software counts and prohibited software per device. 
+
+Action: 
+
+Count total software per device. 
+
+Count prohibited software per device. 
+
+List prohibited software per device. 
+
+ 
+
+Step 7: Compute SWAM Scores 
+
+Purpose: Assign a pass/fail score to each device based on the presence of prohibited software. 
+
+Action: 
+
+Assign score 1 (Pass) if no prohibited software. 
+
+Assign score 0 (Fail) if any prohibited software. 
+
+ 
+
+Step 8: Enrich with FISMA Details 
+
+Purpose: Add FISMA system context to each device’s SWAM score. 
+
+Action: 
+
+Join device scores with FISMA system details. 
+
+ 
+
+Step 9: Final Output 
+
+Purpose: Produce a comprehensive, enriched device-level SWAM score report. 
+
+Action: 
+
+Select and present enriched device-level SWAM scores and relevant FISMA attributes. 
+
+Output Table: 
+crma_hive.crma_hive_fismascorecard_device_swam_score 
+
+Updated daily 
+
+Daily scores are appended to the table with ETL dates 
+
+ 
+
+FISMA SYSTEM Level SWAM Score 
+
+Step 0: Input Datasets 
+
+crma_hive.crma_hive_fismascorecard_device_swam_score: Device-level SWAM scores. 
+
+crma_hive.crma_hive_snow_fismadetails: FISMA system attributes. 
+
+ 
+
+Step 1: Calculate FISMA-Level SWAM Score 
+
+Purpose: Compute the SWAM score percentage for each FISMA system based on device scores. 
+
+Action: 
+
+Aggregate device-level SWAM scores by FISMA ID. 
+
+Calculate the percentage of devices passing (score = 1) for each FISMA system. 
+
+ 
+
+Step 2: Enrich FISMA SWAM Scores with System Details 
+
+Purpose: Add FISMA system context to each SWAM score for reporting. 
+
+Action: 
+
+Join FISMA SWAM scores with FISMA system details. 
+
+Select relevant FISMA attributes for the final output. 
+
+Output Table: 
+crma_hive.crma_hive_fismascorecard_fisma_system_swam_score 
+
+Updated daily 
+
+Daily scores are appended to the table with ETL dates 
+
+ 
+
+SQL Scripts 
+
+Device Level scoring 
+
+WITH 
+
+-- Step 1: Join tvm normalized softwares to mobius reference map on softwar name 
+
+        -- LEFT JOIN normalized_tvm_software to tvm_to_mobius_software map ON software_name 
+
+partial_match  AS( 
+
+    SELECT DISTINCT  
+
+        ts.asset_id, 
+
+        ts.last_seen AS assets_last_seen, 
+
+        map.tvm_software_name, 
+
+        ts.software_version AS tvm_software_version, 
+
+        map.mobius_software_name 
+
+    FROM crma_hive.crma_hive_tvm_normalized_softwares ts 
+
+    LEFT JOIN crma_hive.crma_hive_tvm_to_mobius_software_map map 
+
+        ON ts.software_name=map.tvm_software_name 
+
+    WHERE ts.last_seen >= %(current_month_start)s    
+
+), 
+
+-- Step 2: Check if tvm-mobius  software name  match also match on version  
+
+        -- LEFT JOIN partial_match to normalized_mobius map ON software_name and version(or version_label) 
+
+        -- x in version is wildcard character and should match any number.  
+
+full_match AS( 
+
+    SELECT DISTINCT  
+
+        pm.asset_id, 
+
+        pm.tvm_software_name, 
+
+        pm.tvm_software_version, 
+
+        pm.assets_last_seen, 
+
+        ms.software_name AS mobius_software_name, 
+
+        ms.software_version AS mobius_software_version, 
+
+        ms.version_label AS mobius_version_label, 
+
+        ms.status 
+
+    FROM partial_match pm 
+
+    LEFT JOIN crma_hive.crma_hive_mobius_normalized_softwares ms 
+
+        ON pm.mobius_software_name=ms.software_name 
+
+        AND( 
+
+            pm.tvm_software_version = ms.software_version 
+
+                OR pm.tvm_software_version = ms.version_label 
+
+                OR ms.software_version ~ ('^' || regexp_replace(pm.tvm_software_version, 'x', '[0-9]+', 'g') || '$') 
+
+                OR ms.version_label ~ ('^' || regexp_replace(pm.tvm_software_version, 'x', '[0-9]+', 'g') || '$') 
+
+                OR pm.tvm_software_version ~ ('^' || regexp_replace(ms.software_version, 'x', '[0-9]+', 'g') || '$') 
+
+                OR pm.tvm_software_version ~ ('^' || regexp_replace(ms.version_label, 'x', '[0-9]+', 'g') || '$') 
+
+            ) 
+
+), 
+
+-- Step 3: Join full_match with axonius devices data to identify eligible devices 
+
+deduped_devices AS(  
+
+        -- Step 3.1: Dedup asset_id  
+
+            -- group by asset_id -> rank by device_last_seen, keep top ranked 
+
+    SELECT * 
+
+    FROM ( 
+
+        SELECT *, 
+
+            ROW_NUMBER() OVER ( 
+
+                PARTITION BY asset_id 
+
+                ORDER BY device_last_seen DESC 
+
+            ) AS asset_rn 
+
+        FROM crma_hive.crma_hive_fismascorecard_input_devices 
+
+        WHERE asset_id IS NOT NULL 
+
+    ) ranked 
+
+    WHERE asset_rn = 1  
+
+    UNION ALL 
+
+    SELECT *, 
+
+        NULL AS asset_rn 
+
+    FROM crma_hive.crma_hive_fismascorecard_input_devices  
+
+    WHERE asset_id IS NULL 
+
+), 
+
+eligible_device_softwares AS ( 
+
+        -- 3.2: Join 
+
+    SELECT  DISTINCT  
+
+        dev.device_id, 
+
+        preferred_hostname AS hostname,  
+
+        preferred_ipv4  AS ip, 
+
+        dev.fisma_id, 
+
+        dev.devicerole, 
+
+        dev.device_last_seen, 
+
+        dev.asset_id, 
+
+        dev.is_credentialed, 
+
+        dev.last_authenticated_scan_date, 
+
+        sw.tvm_software_name AS software, 
+
+        sw.tvm_software_version AS version, 
+
+        sw.status 
+
+    FROM deduped_devices dev 
+
+    LEFT JOIN full_match sw   
+
+        ON dev.asset_id = sw.asset_id 
+
+    WHERE dev.device_last_seen >= %(current_month_start)s 
+
+        AND dev.devicerole = 'ENDPOINT' 
+
+        AND dev.is_credentialed IS TRUE 
+
+), 
+
+-- Step 4: Standardaize software status field to prep for scoring 
+
+remove_exclude_list_sofwares AS ( 
+
+    SELECT * 
+
+    FROM eligible_device_softwares 
+
+    WHERE LOWER(software) NOT IN ( 
+
+        'microsoft internet explorer', 
+
+        'microsoft visioviewer', 
+
+        'microsoft office compatibility pack', 
+
+        'microsoft visio viewer' 
+
+) 
+
+), 
+
+-- Step 5: Standardaize software status field to prep for scoring 
+
+standardaized_software_status AS( 
+
+    SELECT DISTINCT  
+
+        device_id, 
+
+        hostname, 
+
+        ip, 
+
+        fisma_id, 
+
+        device_last_seen, 
+
+        asset_id, 
+
+        is_credentialed, 
+
+        last_authenticated_scan_date, 
+
+        software, 
+
+        version,         
+
+        CASE 
+
+            WHEN status ILIKE 'Prohibited' OR status ILIKE 'Not Authorized' THEN 'Prohibited' 
+
+            ELSE NULL 
+
+        END AS sw_status 
+
+    FROM remove_exclude_list_sofwares  
+
+), 
+
+-- Step 6: Per device aggregates  
+
+per_device_aggs AS ( 
+
+    SELECT 
+
+        device_id, 
+
+        MAX(hostname) AS hostname, 
+
+        MAX(ip)  As ip, 
+
+        MAX(fisma_id) AS fisma_id, 
+
+        asset_id, 
+
+        MAX(device_last_seen) AS device_last_seen, 
+
+        BOOL_OR(is_credentialed) AS is_credentialed, 
+
+        MAX(last_authenticated_scan_date) AS last_authenticated_scan_date,        
+
+        COUNT(*) AS total_sw_count, 
+
+        SUM(CASE WHEN sw_status = 'Prohibited' THEN 1 ELSE 0 END) AS prohibited_sw_count, 
+
+        STRING_AGG( 
+
+            DISTINCT CONCAT(software, ' ', COALESCE(version, '')), 
+
+            ', ' 
+
+        ) FILTER (WHERE sw_status = 'Prohibited') AS prohibited_softwares_list 
+
+    FROM standardaized_software_status 
+
+    GROUP BY device_id, asset_id 
+
+), 
+
+-- Step 7: Compute device SWAM scores   
+
+swam_scores AS( 
+
+    SELECT  
+
+        device_id, 
+
+        hostname, 
+
+        ip, 
+
+        fisma_id, 
+
+        asset_id, 
+
+        device_last_seen, 
+
+        is_credentialed, 
+
+        last_authenticated_scan_date,        
+
+        total_sw_count, 
+
+        prohibited_sw_count, 
+
+        prohibited_softwares_list,  
+
+        CASE  
+
+            WHEN prohibited_sw_count = 0 THEN 1   -- pass 
+
+            ELSE 0   --fail 
+
+        END AS swam_score 
+
+         
+
+    FROM per_device_aggs 
+
+ 
+
+), 
+
+-- Step 8: Join enrich device scores with FISMA details  
+
+device_swam_scores_enriched AS ( 
+
+    SELECT  
+
+        sw.device_id, 
+
+        sw.hostname, 
+
+        sw.ip, 
+
+        sw.device_last_seen, 
+
+        sw.fisma_id, 
+
+        fd.fisma_name, 
+
+        fd.security_support_portfolio AS portfolio, 
+
+        fd.dhs_hva, 
+
+        fd.public_facing, 
+
+        fd.cfo_designated, 
+
+        fd.fips_199_security_categorization_overall, 
+
+        fd.active, 
+
+        fd.iscm_waiver,  
+
+        fd.fisma_reportable, 
+
+        fd.fisma_inventory_selc_status, 
+
+        fd.fisma_category, 
+
+        sw.asset_id, 
+
+        sw.last_authenticated_scan_date, 
+
+        sw.is_credentialed, 
+
+        sw.prohibited_sw_count, 
+
+        sw.prohibited_softwares_list, 
+
+        sw.total_sw_count, 
+
+        sw.swam_score     
+
+    FROM swam_scores sw 
+
+    LEFT JOIN crma_hive.crma_hive_snow_fismadetails fd 
+
+        ON sw.fisma_id = fd.fisma_id 
+
+) 
+
+SELECT  
+
+    device_id, 
+
+    hostname, 
+
+    ip, 
+
+    fisma_id, 
+
+    fisma_name, 
+
+    portfolio, 
+
+    dhs_hva, 
+
+    public_facing, 
+
+    cfo_designated, 
+
+    fips_199_security_categorization_overall, 
+
+    active, 
+
+    iscm_waiver,  
+
+    fisma_reportable, 
+
+    fisma_inventory_selc_status, 
+
+    fisma_category, 
+
+    device_last_seen, 
+
+    asset_id, 
+
+    is_credentialed, 
+
+    last_authenticated_scan_date, 
+
+    prohibited_sw_count, 
+
+    prohibited_softwares_list, 
+
+    total_sw_count, 
+
+    swam_score 
+
+FROM device_swam_scores_enriched 
+
+ 
+
+ 
+
+ 
+
+FISMA Level scoring 
+
+WITH  
+
+fisma_swam_score AS ( 
+
+    SELECT 
+
+        fisma_id, 
+
+        CAST(SUM(CASE WHEN swam_score = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS INT) AS swam_score 
+
+    FROM crma_hive.crma_hive_fismascorecard_device_swam_score 
+
+    WHERE etl_date = %(etl_date)s 
+
+    GROUP BY fisma_id 
+
+) 
+
+SELECT  
+
+    a.fisma_id, 
+
+    a.fisma_name, 
+
+    a.security_support_portfolio AS portfolio, 
+
+    a.dhs_hva, 
+
+    a.public_facing, 
+
+    a.cfo_designated, 
+
+    a.fips_199_security_categorization_overall, 
+
+    a.active, 
+
+    a.iscm_waiver, 
+
+    a.fisma_reportable, 
+
+    a.fisma_inventory_selc_status, 
+
+    a.fisma_catagory, 
+
+    b.swam_score 
+
+FROM crma_hive.crma_hive_snow_fismadetails a 
+
+LEFT JOIN fisma_swam_score b 
+
+    ON a.fisma_id = b.fisma_id 
+
+ 
+
+Hardware Asset Management (HWAM) 
+
+Requirements & Solution Design 
+
+See: fisma_scorecard_hwam_score_solutions.docx 
+
+Implementation 
+
+FISMA SYSTEM Level HWAM Score 
+
+Step 0: Input Datasets 
+
+crma_hive.crma_hive_fismascorecard_input_devices: Device inventory for FISMA Scorecard (primarily from Axonius). 
+
+crma_hive.crma_hive_snow_fismadetails: FISMA system attributes and context. 
+
+ 
+
+Step 1: Select Eligible Devices 
+
+Purpose: Identify devices relevant for HWAM scoring. 
+
+Action: 
+
+Select devices seen in the current month. 
+
+ 
+
+Step 2: Determine Asset Management Status 
+
+Purpose: Classify devices as 'managed' or 'unauthorized'. 
+
+Action: 
+
+If device has a FISMA ID, mark as 'managed'. 
+
+Otherwise, mark as 'unauthorized'. 
+
+ 
+
+Step 3: Apply Identification Rule 
+
+Purpose: Assess whether each device is properly identified. 
+
+Action: 
+
+Device must have non-null values for device type, IPv4, and hostname. 
+
+If device type is 'ENDPOINT - SERVER', 'ENDPOINT - WORKSTATION', or 'ENDPOINT - LAPTOP', OS must not be null. 
+
+If device type is 'ENDPOINT - WORKSTATION' or 'ENDPOINT - LAPTOP', hostname cannot be an IP address. 
+
+ 
+
+Step 4: Count Assets by Category 
+
+Purpose: Summarize asset counts for scoring. 
+
+Action: 
+
+Count identified and managed assets. 
+
+Count managed assets. 
+
+Count unauthorized assets. 
+
+Count total assets. 
+
+ 
+
+Step 5: Calculate HWAM Score 
+
+Purpose: Assign a HWAM score to each FISMA system. 
+
+Action: 
+
+If managed assets or total assets are zero, HWAM score is NULL. 
+
+Otherwise, HWAM score is: 
+
+(identified_and_managed_assets / managed_assets)  * 100 
+
+Step 6: Enrich with FISMA Details 
+
+Purpose: Add FISMA system context to HWAM scores. 
+
+Action: 
+
+Join HWAM scores with FISMA system details. 
+
+ 
+
+Step 7: Final Output 
+
+Purpose: Produce a comprehensive, enriched FISMA-level HWAM score report. 
+
+Action: 
+
+Select and present enriched HWAM scores and relevant FISMA attributes. 
+
+Output Table: 
+crma_hive.crma_hive_fismascorecard_fisma_system_hwam_score 
+
+Updated daily 
+
+Daily scores are appended to the table with ETL dates 
+
+ 
+
+Component Level HWAM Score 
+
+Step 0: Input Datasets 
+
+crma_hive.crma_hive_fismascorecard_input_devices: Device inventory for FISMA Scorecard (primarily from Axonius). 
+
+ 
+
+ 
+
+Step 1: Select Eligible Devices 
+
+Purpose: Identify devices relevant for component-level HWAM scoring. 
+
+Action: 
+
+Select devices seen in the current month. 
+
+Unnest FISMA IDs for each device. 
+
+ 
+
+Step 2: Determine Asset Management Status 
+
+Purpose: Classify devices as 'managed' or 'unauthorized'. 
+
+Action: 
+
+If device has a FISMA ID, mark as 'managed'. 
+
+Otherwise, mark as 'unauthorized'. 
+
+ 
+
+Step 3: Apply Identification Rule 
+
+Purpose: Assess whether each device is properly identified. 
+
+Action: 
+
+Device must have non-null values for device type, IPv4, and hostname. 
+
+If device type is 'ENDPOINT - SERVER', 'ENDPOINT - WORKSTATION', or 'ENDPOINT - LAPTOP', OS must not be null. 
+
+If device type is 'ENDPOINT - WORKSTATION' or 'ENDPOINT - LAPTOP', hostname cannot be an IP address. 
+
+ 
+
+Step 4: Count Assets by Category 
+
+Purpose: Summarize asset counts for scoring. 
+
+Action: 
+
+Count identified and managed assets. 
+
+Count managed assets. 
+
+Count unauthorized assets. 
+
+Count total assets. 
+
+ 
+
+Step 5: Calculate Component HWAM Score 
+
+Purpose: Assign a HWAM score to each component. 
+
+Action: 
+
+If managed assets or total assets are zero, HWAM score is NULL. 
+
+Otherwise, HWAM score is: 
+
+((identified_and_managed_assets / managed_assets) - (unauthorized_assets / total_assets)) * 100 
+
+ 
+
+ 
+
+ 
+
+ unthorized_assets + authorized(where : fisma_reportable, not iscm waved, operational, MAJ, GSS) 
+
+ 
+
+ 
+
+Step 6: Final Output 
+
+Purpose: Produce a comprehensive, component-level HWAM score report. 
+
+Action: 
+
+Select and present component-level HWAM scores and asset counts. 
+
+Output Table: 
+crma_hive.crma_hive_fismascorecard_component_hwam_score 
+
+Updated daily 
+
+Daily scores are appended to the table with ETL dates 
+
+ 
+
+SQL Scripts 
+
+FISMA Level scoring 
+
+WITH 
+
+-- Step 1: Select eligible devices  
+
+eligible_devices AS( 
+
+    SELECT  
+
+        device_id, 
+
+        fisma_id,  
+
+        devicetype, 
+
+        preferred_hostname, 
+
+        preferred_ipv4, 
+
+        os, 
+
+        device_last_seen 
+
+    FROM crma_hive.crma_hive_fismascorecard_input_devices 
+
+    WHERE device_last_seen >= %(current_month_start)s    
+
+), 
+
+-- Step 2: Get asset managment status 
+
+asset_management_status AS ( 
+
+    SELECT 
+
+        device_id, 
+
+        fisma_id, 
+
+        devicetype, 
+
+        preferred_hostname, 
+
+        preferred_ipv4, 
+
+        os, 
+
+        device_last_seen, 
+
+        CASE 
+
+            WHEN fisma_id IS NOT NULL THEN 'managed' 
+
+            ELSE 'unauthorized' 
+
+        END AS asset_status 
+
+    FROM eligible_devices 
+
+), 
+
+-- Step 3: Apply identification rule 
+
+asset_identification_status AS ( 
+
+SELECT 
+
+        *, 
+
+        CASE 
+
+            WHEN devicetype IS NOT NULL 
+
+            AND preferred_ipv4 IS NOT NULL 
+
+            AND preferred_hostname IS NOT NULL 
+
+            AND ( 
+
+                -- If device_type is 'server', 'workstation', or 'laptop', device_os must NOT be null 
+
+                ( 
+
+                    devicetype IN ('ENDPOINT - SERVER', 'ENDPOINT - WORKSTATION', 'ENDPOINT - LAPTOP') 
+
+                    AND os IS NOT NULL 
+
+                ) 
+
+                OR 
+
+                ( 
+
+                    devicetype NOT IN ('ENDPOINT - SERVER', 'ENDPOINT - WORKSTATION', 'ENDPOINT - LAPTOP') 
+
+                ) 
+
+            ) 
+
+            AND ( 
+
+                -- If device_type is 'workstation' or 'laptop', hostname cannot be an IP address 
+
+                ( 
+
+                    devicetype IN ('ENDPOINT - WORKSTATION', 'ENDPOINT - LAPTOP') 
+
+                    AND preferred_hostname !~ '^\d{1,3}(\.\d{1,3}){3}$' 
+
+                ) 
+
+                OR 
+
+                ( 
+
+                    devicetype NOT IN ('ENDPOINT - WORKSTATION', 'ENDPOINT - LAPTOP') 
+
+                ) 
+
+            ) 
+
+            THEN TRUE 
+
+            ELSE FALSE 
+
+        END AS is_identified 
+
+    FROM asset_management_status 
+
+), 
+
+-- Step 4:  Count assets by catagory 
+
+asset_counts AS ( 
+
+    SELECT 
+
+        fisma_id, 
+
+        COUNT(*) FILTER (WHERE is_identified = TRUE AND asset_status = 'managed') AS identified_and_managed_assets, 
+
+        COUNT(*) FILTER (WHERE asset_status = 'managed') AS managed_assets, 
+
+        COUNT(*) FILTER (WHERE asset_status = 'unauthorized') AS unauthorized_assets, 
+
+        COUNT(*) AS total_assets 
+
+    FROM asset_identification_status 
+
+    GROUP BY fisma_id 
+
+), 
+
+-- Step 5: Score 
+
+scores AS ( 
+
+    SELECT 
+
+        fisma_id, 
+
+        identified_and_managed_assets, 
+
+        managed_assets, 
+
+        unauthorized_assets, 
+
+        total_assets, 
+
+        CASE 
+
+            WHEN managed_assets = 0 OR total_assets = 0 THEN NULL 
+
+            ELSE ROUND( 
+
+                ((identified_and_managed_assets::float / managed_assets) - (unauthorized_assets::float / total_assets)) * 100 
+
+            )::int 
+
+        END AS hwam_score 
+
+    FROM asset_counts 
+
+), 
+
+--  Step 6: Enrich with fisma details 
+
+fisma_hwam_scores_enriched AS ( 
+
+    SELECT  
+
+        f.fisma_id, 
+
+        f.fisma_name, 
+
+        f.security_support_portfolio AS portfolio, 
+
+        f.dhs_hva, 
+
+        f.public_facing, 
+
+        f.cfo_designated, 
+
+        f.fips_199_security_categorization_overall, 
+
+        f.active, 
+
+        f.iscm_waiver,  
+
+        f.fisma_reportable, 
+
+        f.fisma_inventory_selc_status, 
+
+        f.fisma_catagory, 
+
+        s.identified_and_managed_assets, 
+
+        s.managed_assets, 
+
+        s.unauthorized_assets, 
+
+        s.total_assets, 
+
+        s.hwam_score     
+
+    FROM crma_hive.crma_hive_snow_fismadetails f  
+
+    LEFT JOIN scores s 
+
+        ON s.fisma_id = f.fisma_id 
+
+) 
+
+SELECT  
+
+    fisma_id, 
+
+    fisma_name, 
+
+    portfolio, 
+
+    dhs_hva, 
+
+    public_facing, 
+
+    cfo_designated, 
+
+    fips_199_security_categorization_overall, 
+
+    active, 
+
+    iscm_waiver,  
+
+    fisma_reportable, 
+
+    fisma_inventory_selc_status, 
+
+    fisma_catagory, 
+
+    identified_and_managed_assets, 
+
+    managed_assets, 
+
+    unauthorized_assets, 
+
+    total_assets, 
+
+    hwam_score  
+
+FROM fisma_hwam_scores_enriched 
+
+ 
+
+ 
+
+ 
+
+Component Level scoring 
+
+WITH 
+
+-- Step 1: Select eligible devices  
+
+eligible_devices AS( 
+
+    SELECT  
+
+        d.device_id, 
+
+        d.fisma_id,  
+
+        d.devicetype, 
+
+        d.preferred_hostname, 
+
+        d.preferred_ipv4, 
+
+        d.os, 
+
+        d.device_last_seen, 
+
+        f.fisma_reportable, 
+
+        f.iscm_waiver, 
+
+        f.fisma_inventory_selc_status, 
+
+        f.fisma_catagory 
+
+    FROM  crma_hive.crma_hive_fismascorecard_input_devices  d 
+
+    LEFT JOIN crma_hive.crma_hive_snow_fismadetails f 
+
+        ON d.fisma_id=f.fisma_id 
+
+    WHERE device_last_seen >= %(current_month_start)s  
+
+), 
+
+eligible_fisma AS( 
+
+    SELECT  
+
+        * 
+
+    FROM  eligible_devices       
+
+    WHERE ((fisma_reportable iLike 'yes' 
+
+        AND fisma_catagory in ('MAJ', 'GSS') 
+
+        AND fisma_inventory_selc_status iLike 'Operational' 
+
+        AND COALESCE(iscm_waiver, '') not ILIKE 'yes' 
+
+        )  
+
+        OR fisma_id is null 
+
+    ) 
+
+), 
+
+-- Step 2: Get asset managment status 
+
+asset_management_status AS ( 
+
+    SELECT 
+
+        *, 
+
+        CASE 
+
+            WHEN fisma_id IS NOT NULL THEN 'managed' 
+
+            ELSE 'unauthorized' 
+
+        END AS asset_status 
+
+    FROM eligible_fisma 
+
+), 
+
+-- Step 3: Apply identification rule 
+
+asset_identification_status AS ( 
+
+SELECT 
+
+        *, 
+
+        CASE 
+
+            WHEN devicetype IS NOT NULL 
+
+            AND preferred_ipv4 IS NOT NULL 
+
+            AND preferred_hostname IS NOT NULL 
+
+            AND ( 
+
+                -- If devicetype is 'server', 'workstation', or 'laptop', device os must NOT be null 
+
+                ( 
+
+                    devicetype IN ('ENDPOINT - SERVER', 'ENDPOINT - WORKSTATION', 'ENDPOINT - LAPTOP') 
+
+                    AND os IS NOT NULL 
+
+                ) 
+
+                OR 
+
+                ( 
+
+                    devicetype NOT IN ('ENDPOINT - SERVER', 'ENDPOINT - WORKSTATION', 'ENDPOINT - LAPTOP') 
+
+                ) 
+
+            ) 
+
+            AND ( 
+
+                -- If devicetype is 'workstation' or 'laptop', hostname cannot be an IP address 
+
+                ( 
+
+                    devicetype IN ('ENDPOINT - WORKSTATION', 'ENDPOINT - LAPTOP') 
+
+                    AND preferred_hostname !~ '^\d{1,3}(\.\d{1,3}){3}$' 
+
+                ) 
+
+                OR 
+
+                ( 
+
+                    devicetype NOT IN ('ENDPOINT - WORKSTATION', 'ENDPOINT - LAPTOP') 
+
+                ) 
+
+            ) 
+
+            THEN TRUE 
+
+            ELSE FALSE 
+
+        END AS is_identified 
+
+    FROM asset_management_status 
+
+), 
+
+-- Step 4:  Count assets by catagory 
+
+component_asset_counts AS ( 
+
+    SELECT 
+
+        'ICE' AS component, 
+
+        COUNT(*) FILTER (WHERE is_identified = TRUE AND asset_status = 'managed') AS identified_and_managed_assets, 
+
+        COUNT(*) FILTER (WHERE asset_status = 'managed') AS managed_assets, 
+
+        COUNT(*) FILTER (WHERE asset_status = 'unauthorized') AS unauthorized_assets, 
+
+        (SELECT COUNT(*) FROM eligible_devices) AS total_assets  
+
+    FROM asset_identification_status 
+
+), 
+
+componenet_hwan_score AS ( 
+
+    SELECT 
+
+        component, 
+
+        identified_and_managed_assets, 
+
+        managed_assets, 
+
+        unauthorized_assets, 
+
+        total_assets, 
+
+        CASE 
+
+            WHEN managed_assets = 0 OR total_assets = 0 THEN NULL 
+
+            ELSE ROUND( 
+
+                ((identified_and_managed_assets::float / managed_assets) - (unauthorized_assets::float / total_assets)) * 100 
+
+            )::int 
+
+        END AS hwam_score 
+
+    FROM component_asset_counts 
+
+) 
+
+SELECT  
+
+    component, 
+
+    identified_and_managed_assets, 
+
+    managed_assets, 
+
+    unauthorized_assets, 
+
+    total_assets, 
+
+    hwam_score 
+
+FROM componenet_hwan_score 
+
+ 
+
+ 
+
+ 
+
+Host-Based Defense (HBD) 
+
+Requirements & Solution Design 
+
+See: fisma_scorecard_hbd_score_solutions.docx 
+
+ 
+
+Implementation 
+
+Device Level HBD Score 
+
+Step 0: Input Datasets 
+
+crma_hive.crma_hive_fismascorecard_input_devices: Device inventory for FISMA Scorecard (primarily from Axonius, with adapter and EDR info). 
+
+crma_hive.crma_hive_snow_fismadetails: FISMA system attributes and context. 
+
+ 
+
+Step 1: Select Eligible Devices 
+
+Purpose: Identify devices relevant for HBD scoring. 
+
+Action: 
+
+Select devices seen in the current month. 
+
+Filter for devices with role 'ENDPOINT'. 
+
+ 
+
+Step 2: Flag CrowdStrike Adapter Association 
+
+Purpose: Determine if device is associated with CrowdStrike adapter. 
+
+Action: 
+
+Set flag if 'crowd_strike_adapter' is present in device's adapter list. 
+
+ 
+
+Step 3: Add EDR and AV Compliance Fields 
+
+Purpose: Determine device compliance with EDR and AV requirements. 
+
+Action: 
+
+AV compliance: Flag as compliant if CrowdStrike was seen in the last 15 days. 
+
+EDR (Endpoint Detection and Response (intrusion prevention) ) compliance: Flag as compliant if EDR is enabled. 
+
+ 
+
+Step 4: Calculate Device HBD Score 
+
+Purpose: Assign HBD score to each device based on compliance posture. 
+
+Action: 
+
+If device is not associated with CrowdStrike adapter, assign score 0. 
+
+Otherwise, calculate score as: ((0.5 * AV compliance) + (0.5 * EDR compliance)) * 100 
+
+Step 5: Enrich with FISMA Details 
+
+Purpose: Add FISMA system context to each device’s HBD score. 
+
+Action: 
+
+Join device scores with FISMA system details. 
+
+Step 6: Final Output 
+
+Purpose: Produce a comprehensive, enriched device-level HBD score report. 
+
+Action: 
+
+Select and present enriched device-level HBD scores and relevant FISMA attributes. 
+
+Output Table: 
+crma_hive.crma_hive_fismascorecard_device_hbd_score 
+
+Updated daily 
+
+Daily scores are appended to the table with ETL dates 
+
+ 
+
+FISMA SYSTEM Level HBD Score 
+
+Step 0: Input Datasets 
+
+crma_hive.crma_hive_fismascorecard_device_hbd_score: Device-level HBD scores. 
+
+crma_hive.crma_hive_snow_fismadetails: FISMA system attributes. 
+
+ 
+
+Step 1: Calculate FISMA-Level HBD Score 
+
+Purpose: Compute the average HBD score for each FISMA system. 
+
+Action: 
+
+Aggregate device-level HBD scores by FISMA ID. 
+
+Calculate the average HBD score for each FISMA system (rounded to nearest integer). 
+
+ 
+
+Step 2: Enrich FISMA HBD Scores with System Details 
+
+Purpose: Add FISMA system context to each HBD score for reporting. 
+
+Action: 
+
+Join FISMA HBD scores with FISMA system details. 
+
+Select relevant FISMA attributes for the final output. 
+
+Output Table: 
+crma_hive.crma_hive_fismascorecard_fisma_system_hbd_score 
+
+Updated daily 
+
+Daily scores are appended to the table with ETL dates 
+
+ 
+
+SQL Scripts 
+
+Device Level scoring 
+
+WITH  
+
+-- Step 1: Select eligible devices 
+
+eligible_devices AS ( 
+
+    SELECT  
+
+        device_id, 
+
+        preferred_hostname AS hostname,  
+
+        preferred_ipv4  AS ip, 
+
+        fisma_id, 
+
+        adapters, 
+
+        device_last_seen, 
+
+        devicerole, 
+
+        crowd_strike_last_seen, 
+
+        edr_enabled 
+
+    FROM  crma_hive.crma_hive_fismascorecard_input_devices 
+
+    WHERE device_last_seen >= %(current_month_start)s 
+
+        AND devicerole = 'ENDPOINT' 
+
+), 
+
+-- Step 2: Add a flag to indicate if a device is associated with CrowdStrike adapter or not 
+
+device_crowd_strike_adapter_association AS( 
+
+    SELECT 
+
+        device_id, 
+
+        hostname,  
+
+        ip, 
+
+        fisma_id, 
+
+        adapters, 
+
+        device_last_seen, 
+
+        crowd_strike_last_seen, 
+
+        edr_enabled, 
+
+        ARRAY_POSITION(adapters, 'crowd_strike_adapter') IS NOT NULL AS crowd_strike_adapter 
+
+    FROM eligible_devices 
+
+), 
+
+-- Step 3: Add EDR and AV compliance field 
+
+device_edr_and_av_compliance AS ( 
+
+    SELECT 
+
+        device_id, 
+
+        hostname,  
+
+        ip, 
+
+        fisma_id, 
+
+        adapters, 
+
+        device_last_seen, 
+
+        crowd_strike_last_seen, 
+
+        edr_enabled, 
+
+        crowd_strike_adapter, 
+
+        CASE  
+
+            WHEN crowd_strike_last_seen >= current_date - INTERVAL '15' DAY THEN 1 
+
+            ELSE 0 
+
+        END AS av_compliance, 
+
+        CASE  
+
+            WHEN edr_enabled IS True THEN 1 
+
+            ELSE 0 
+
+        END AS edr_compliance 
+
+    FROM device_crowd_strike_adapter_association 
+
+), 
+
+-- Step 4: Score 
+
+device_hbd_score AS( 
+
+    SELECT 
+
+        device_id, 
+
+        hostname,  
+
+        ip, 
+
+        fisma_id, 
+
+        device_last_seen, 
+
+        adapters, 
+
+        crowd_strike_last_seen, 
+
+        edr_enabled, 
+
+        crowd_strike_adapter, 
+
+        av_compliance, 
+
+        edr_compliance, 
+
+        CASE 
+
+            WHEN crowd_strike_adapter IS NOT TRUE THEN 0 
+
+            ELSE ROUND(((0.5 * av_compliance) + (0.5 * edr_compliance)) * 100)::int 
+
+        END AS hbd_score 
+
+    FROM device_edr_and_av_compliance 
+
+), 
+
+-- Step 5: Enrich with FISMA system information 
+
+device_hbd_scores_enriched AS ( 
+
+    SELECT  
+
+        dhs.device_id, 
+
+        dhs.hostname,  
+
+        dhs.ip, 
+
+        dhs.fisma_id, 
+
+        fd.fisma_name, 
+
+        fd.security_support_portfolio AS portfolio, 
+
+        fd.dhs_hva, 
+
+        fd.public_facing, 
+
+        fd.cfo_designated, 
+
+        fd.fips_199_security_categorization_overall, 
+
+        fd.active, 
+
+        fd.iscm_waiver,  
+
+        fd.fisma_reportable, 
+
+        fd.fisma_inventory_selc_status, 
+
+        fd.fisma_catagory, 
+
+        dhs.adapters, 
+
+        dhs.device_last_seen, 
+
+        dhs.crowd_strike_last_seen, 
+
+        dhs.edr_enabled, 
+
+        dhs.crowd_strike_adapter, 
+
+        dhs.av_compliance, 
+
+        dhs.edr_compliance, 
+
+        dhs.hbd_score         
+
+    FROM device_hbd_score dhs 
+
+    LEFT JOIN crma_hive.crma_hive_snow_fismadetails fd 
+
+        ON dhs.fisma_id = fd.fisma_id 
+
+) 
+
+SELECT  
+
+    device_id, 
+
+    hostname,  
+
+    ip, 
+
+    fisma_id, 
+
+    fisma_name, 
+
+    portfolio, 
+
+    dhs_hva, 
+
+    public_facing, 
+
+    cfo_designated, 
+
+    fips_199_security_categorization_overall, 
+
+    active, 
+
+    iscm_waiver,  
+
+    fisma_reportable, 
+
+    fisma_inventory_selc_status, 
+
+    fisma_catagory, 
+
+    adapters, 
+
+    device_last_seen, 
+
+    crowd_strike_last_seen, 
+
+    edr_enabled, 
+
+    crowd_strike_adapter, 
+
+    av_compliance, 
+
+    edr_compliance, 
+
+    hbd_score         
+
+FROM device_hbd_scores_enriched 
+
+ 
+
+FISMA Level scoring 
+
+WITH  
+
+fisma_hbd_score AS ( 
+
+    SELECT 
+
+        fisma_id, 
+
+        ROUND(AVG(hbd_score))::integer AS  hbd_score 
+
+    FROM crma_hive.crma_hive_fismascorecard_device_hbd_score 
+
+    WHERE etl_date = %(etl_date)s 
+
+    GROUP BY fisma_id 
+
+) 
+
+SELECT  
+
+    a.fisma_id, 
+
+    a.fisma_name, 
+
+    a.security_support_portfolio AS portfolio, 
+
+    a.dhs_hva, 
+
+    a.public_facing, 
+
+    a.cfo_designated, 
+
+    a.fips_199_security_categorization_overall, 
+
+    a.active, 
+
+    a.iscm_waiver, 
+
+    a.fisma_reportable, 
+
+    a.fisma_inventory_selc_status, 
+
+    a.fisma_catagory, 
+
+    b.hbd_score 
+
+FROM crma_hive.crma_hive_snow_fismadetails a 
+
+LEFT JOIN fisma_hbd_score b 
+
+    ON a.fisma_id = b.fisma_id 
+
+ 
+
+Prohibited Operating Systems 
+
+Requirements & Solution Design 
+
+See: fisma_scorecard_prohibited_os_score_solutions.docx 
+
+Implementation 
+
+Device Level Prohibited OS Score 
+
+Step 0: Input Datasets 
+
+crma_hive.crma_hive_fismascorecard_input_devices: Device inventory for FISMA Scorecard (primarily from Axonius, with credential info from Tenable). 
+
+crma_hive.crma_hive_tvm_normalized_os: TVM normalized OS inventory. 
+
+crma_hive.crma_hive_device_to_mobius_os_map: Reference table mapping device OS to Mobius OS names and versions. 
+
+crma_hive.crma_hive_mobius_normalized_softwares: Mobius normalized software inventory, including OS status. 
+
+crma_hive.crma_hive_snow_fismadetails: FISMA system attributes and context. 
+
+ 
+
+Step 1: Select Eligible Devices 
+
+Purpose: Identify devices relevant for prohibited OS scoring. 
+
+Action: 
+
+Select devices seen in the current month. 
+
+Filter for devices with role 'ENDPOINT' and credentialed status TRUE. 
+
+ 
+
+Step 2: Determine Device Operating System 
+
+Purpose: Identify the preferred OS for each device. 
+
+Action: 
+
+Join eligible devices with TVM normalized OS data. 
+
+Select preferred OS as Axonius OS if available, otherwise use TVM OS. 
+
+ 
+
+Step 3: Map Device OS to Mobius Reference 
+
+Purpose: Map device OS to Mobius OS names and versions. 
+
+Action: 
+
+Join device OS data to the device-to-Mobius OS mapping table. 
+
+Only include devices with a non-null OS. 
+
+ 
+
+Step 4: Join to Mobius Normalized Softwares to Get OS Status 
+
+Purpose: Determine the status of the mapped OS (e.g., Prohibited, Not Authorized). 
+
+Action: 
+
+Join mapped OS data to Mobius normalized software inventory using OS name and version. 
+
+ 
+
+Step 5: Compute Device Prohibited OS Score 
+
+Purpose: Assign a prohibited OS score to each device. 
+
+Action: 
+
+If status is 'Prohibited' or 'Not Authorized', assign score 1. 
+
+If no matching OS is found in Mobius, assign score 1. 
+
+Otherwise, assign score 0. 
+
+ 
+
+Step 6: Enrich with FISMA Details 
+
+Purpose: Add FISMA system context to each device’s prohibited OS score. 
+
+Action: 
+
+Join device scores with FISMA system details. 
+
+ 
+
+Step 7: Final Output 
+
+Purpose: Produce a comprehensive, enriched device-level prohibited OS score report. 
+
+Action: 
+
+Select and present enriched device-level prohibited OS scores and relevant FISMA attributes. 
+
+Output Table: 
+crma_hive.crma_hive_fismascorecard_device_prohibited_os_score 
+
+Updated daily 
+
+Daily scores are appended to the table with ETL dates 
+
+ 
+
+FISMA SYSTEM Level Prohibited OS Score 
+
+Step 0: Input Datasets 
+
+crma_hive.crma_hive_fismascorecard_device_prohibited_os_score: Device-level prohibited OS scores. 
+
+crma_hive.crma_hive_snow_fismadetails: FISMA system attributes. 
+
+ 
+
+Step 1: Calculate FISMA-Level Prohibited OS Score 
+
+Purpose: Compute the total number of devices with prohibited OS for each FISMA system. 
+
+Action: 
+
+Aggregate device-level prohibited OS scores by FISMA ID. 
+
+Sum the prohibited OS scores for each FISMA system. 
+
+ 
+
+Step 2: Enrich FISMA Prohibited OS Scores with System Details 
+
+Purpose: Add FISMA system context to each prohibited OS score for reporting. 
+
+Action: 
+
+Join FISMA prohibited OS scores with FISMA system details. 
+
+Select relevant FISMA attributes for the final output. 
+
+Output Table: 
+crma_hive.crma_hive_fismascorecard_fisma_system_prohibited_os_score 
+
+Updated daily 
+
+Daily scores are appended to the table with ETL dates 
+
+ 
+
+SQL Scripts 
+
+Device Level scoring 
+
+WITH  
+
+-- Step 1: Eligible devices 
+
+deduped_devices AS ( 
+
+    -- Step 1.1: dedup 
+
+    SELECT * 
+
+    FROM ( 
+
+        SELECT *, 
+
+            ROW_NUMBER() OVER ( 
+
+                PARTITION BY asset_id 
+
+                ORDER BY device_last_seen DESC 
+
+            ) AS asset_rn 
+
+        FROM crma_hive.crma_hive_fismascorecard_input_devices  
+
+        WHERE asset_id IS NOT NULL 
+
+    ) ranked 
+
+    WHERE asset_rn = 1  
+
+    UNION ALL 
+
+    SELECT *, 
+
+        NULL AS asset_rn 
+
+    FROM crma_hive.crma_hive_fismascorecard_input_devices  
+
+    WHERE asset_id IS NOT NULL 
+
+), 
+
+eligible_devices AS ( 
+
+    -- Step 1.2: apply eligibility filters 
+
+    SELECT  
+
+        device_id, 
+
+        preferred_hostname AS hostname,  
+
+        preferred_ipv4  AS ip, 
+
+        fisma_id, 
+
+        device_last_seen, 
+
+        LOWER(preferred_os) AS axonius_os, 
+
+        asset_id, 
+
+        is_credentialed, 
+
+        last_authenticated_scan_date, 
+
+        devicerole 
+
+    FROM   deduped_devices 
+
+--  WHERE device_last_seen >= %(current_month_start)s   
+
+    WHERE device_last_seen >= DATE_TRUNC('month', CURRENT_DATE)  
+
+), 
+
+-- Step 2: Device Operating system 
+
+device_oss AS ( 
+
+    -- 2.1: Add normalized tvm os  
+
+        SELECT  
+
+            d.device_id, 
+
+            d.hostname,  
+
+            d.ip, 
+
+            d.fisma_id, 
+
+            d.device_last_seen, 
+
+            d.asset_id, 
+
+            d.is_credentialed, 
+
+            d.last_authenticated_scan_date, 
+
+            d.devicerole, 
+
+            d.axonius_os, 
+
+            a.normalized_tvm_os AS tvm_os 
+
+        FROM eligible_devices d 
+
+        LEFT JOIN crma_hive.crma_hive_tvm_normalized_os a 
+
+            ON d.asset_id = a.asset_id 
+
+), 
+
+device_preferred_os AS ( 
+
+    -- 2.1: Select preferred os for the each device 
+
+            -- device os will be axonius os if exists, else tvm os 
+
+    SELECT 
+
+        device_id, 
+
+        hostname,  
+
+        ip, 
+
+        fisma_id, 
+
+        device_last_seen, 
+
+        asset_id, 
+
+        is_credentialed, 
+
+        last_authenticated_scan_date, 
+
+        devicerole, 
+
+        COALESCE(axonius_os, tvm_os) AS device_os 
+
+    FROM device_oss 
+
+), 
+
+-- Step 3: Join axonius device data with reference map to create partial OS map 
+
+partial_map AS( 
+
+    SELECT  
+
+        dpo.device_id, 
+
+        dpo.hostname,  
+
+        dpo.ip, 
+
+        dpo.fisma_id, 
+
+        dpo.device_last_seen, 
+
+        dpo.asset_id, 
+
+        dpo.is_credentialed, 
+
+        dpo.last_authenticated_scan_date, 
+
+        dpo.devicerole, 
+
+        dpo.device_os,       
+
+        dtmo.mobius_os_name, 
+
+        dtmo.mobius_os_version, 
+
+        dtmo.mobius_os_version_2, 
+
+        dtmo. component 
+
+    FROM device_preferred_os dpo 
+
+    LEFT JOIN crma_hive.crma_hive_device_to_mobius_os_map dtmo 
+
+        ON dpo.device_os =  dtmo.device_os  
+
+    WHERE dpo.device_os IS NOT NULL  
+
+), 
+
+-- Step 4: Join to nomalized mobius softwars to create full os map with mobius os status field 
+
+full_match AS ( 
+
+    SELECT  
+
+    pm.*, 
+
+    mns.status   
+
+    FROM partial_map pm 
+
+    LEFT JOIN crma_hive.crma_hive_mobius_normalized_softwares mns 
+
+        ON  pm.mobius_os_name = mns.software_name 
+
+        AND pm.mobius_os_version = mns.software_version 
+
+        and pm.component = mns.component 
+
+ 
+
+        AND ( 
+
+                pm.mobius_os_version_2 = mns.version_label 
+
+                OR (pm.mobius_os_version_2 IS NULL AND mns.version_label IS NULL) 
+
+            ) 
+
+), 
+
+-- Step 5: Compute Score 
+
+device_prohibited_os_score AS ( 
+
+    SELECT 
+
+        *, 
+
+        CASE 
+
+            WHEN status IN ('Prohibited', 'Not Authorized', 'Archived') THEN 1 
+
+            WHEN status IS NULL THEN 1   -- NO matching OS found in mobius 
+
+            ELSE 0 
+
+        END AS prohibited_os_score 
+
+    FROM full_match 
+
+), 
+
+-- Step 6: Enrich with FISMA system information 
+
+device_prohibited_os_scores_enriched AS ( 
+
+    SELECT  
+
+        dpos.device_id, 
+
+        dpos.hostname,  
+
+        dpos.ip, 
+
+        dpos.fisma_id, 
+
+        fd.fisma_name, 
+
+        fd.security_support_portfolio AS portfolio, 
+
+        fd.dhs_hva, 
+
+        fd.public_facing, 
+
+        fd.cfo_designated, 
+
+        fd.fips_199_security_categorization_overall, 
+
+        fd.active, 
+
+        fd.iscm_waiver,  
+
+        fd.fisma_reportable, 
+
+        fd.fisma_inventory_selc_status, 
+
+        fd.fisma_category, 
+
+        dpos.device_last_seen, 
+
+        dpos.asset_id, 
+
+        dpos.is_credentialed, 
+
+        dpos.last_authenticated_scan_date, 
+
+        dpos.devicerole, 
+
+        dpos.device_os, 
+
+        dpos.mobius_os_name, 
+
+        dpos.mobius_os_version, 
+
+        dpos.mobius_os_version_2, 
+
+        dpos.status, 
+
+        dpos.prohibited_os_score   
+
+    FROM device_prohibited_os_score dpos 
+
+    LEFT JOIN crma_hive.crma_hive_snow_fismadetails fd 
+
+        ON dpos.fisma_id = fd.fisma_id 
+
+) 
+
+SELECT  
+
+    device_id, 
+
+    hostname,  
+
+    ip, 
+
+    fisma_id, 
+
+    fisma_name, 
+
+    portfolio, 
+
+    dhs_hva, 
+
+    public_facing, 
+
+    cfo_designated, 
+
+    fips_199_security_categorization_overall, 
+
+    active, 
+
+    iscm_waiver,  
+
+    fisma_reportable, 
+
+    fisma_inventory_selc_status, 
+
+    fisma_category, 
+
+    device_last_seen, 
+
+    asset_id, 
+
+    is_credentialed, 
+
+    last_authenticated_scan_date, 
+
+    devicerole, 
+
+    device_os, 
+
+    mobius_os_name, 
+
+    mobius_os_version, 
+
+    mobius_os_version_2, 
+
+    status, 
+
+    prohibited_os_score    
+
+FROM device_prohibited_os_scores_enriched 
+
+ 
+
+FISMA Level scoring 
+
+WITH 
+
+fisma_prohibited_os_score AS ( 
+
+    SELECT 
+
+        fisma_id, 
+
+        SUM(prohibited_os_score) AS prohibited_os_score 
+
+    FROM crma_hive.crma_hive_fismascorecard_device_prohibited_os_score 
+
+    WHERE devicerole = 'ENDPOINT' 
+
+--  AND etl_date = %(etl_date)s 
+
+    AND etl_date = CURRENT_DATE 
+
+    GROUP BY fisma_id 
+
+) 
+
+SELECT  
+
+    a.fisma_id, 
+
+    a.fisma_name, 
+
+    a.security_support_portfolio AS portfolio, 
+
+    a.dhs_hva, 
+
+    a.public_facing, 
+
+    a.cfo_designated, 
+
+    a.fips_199_security_categorization_overall, 
+
+    a.active, 
+
+    a.iscm_waiver, 
+
+    a.fisma_reportable, 
+
+    a.fisma_inventory_selc_status, 
+
+    a.fisma_category, 
+
+    b.prohibited_os_score 
+
+FROM crma_hive.crma_hive_snow_fismadetails a 
+
+LEFT JOIN fisma_prohibited_os_score b 
+
+    ON a.fisma_id = b.fisma_id 
+
+ 
+
+ 
+
+ 
+
+Security Authorization  
+
+Requirements & Solution Design 
+
+See: fisma_scorecard_security_authorization_solution.docx 
+
+ 
+
+Implementation 
+
+FISMA SYSTEM Level Security Authorization Score 
+
+Step 0: Input Datasets 
+
+crma_hive.crma_hive_csam_systems_general_details_query: CSAM system general details, including ATO and review dates. 
+
+crma_hive.crma_hive_snow_fismadetails: FISMA system attributes and context. 
+
+ 
+
+Step 1: Select Eligible Systems 
+
+Purpose: Identify FISMA-reportable, operational systems for scoring. 
+
+Action: 
+
+Select systems where: 
+
+fisma_reportable = 'Yes' 
+
+system_operational_status = 'Operational' 
+
+FISMA category is 'GSS' or 'MAJ' 
+
+Join CSAM system details with FISMA attributes. 
+
+ 
+
+Step 2: Compute Partial Security Authorization Checks 
+
+Purpose: Evaluate key security authorization criteria for each system. 
+
+Action: 
+
+For each system, check: 
+
+ATO Status: 
+
+ato_date is not null and <= current date 
+
+ato_expiration is null or >= current date 
+
+Document Review Approval: 
+
+document_review_approval_date_completed is not null and <= current date 
+
+Contingency Plan Review: 
+
+contingency_plan_review_date_completed is not null and <= current date 
+
+Contingency Plan Test Review: 
+
+contingency_plan_test_review_date_completed is not null and <= current date 
+
+ 
+
+Step 3:  Aggregate and Score 
+
+Purpose: Assign a Security Authorization score to each system based on compliance with required checks. 
+
+Action: 
+
+Typically, score is computed based on the presence and recency of ATO and required reviews/tests. 
+
+Systems passing all checks are considered authorized. 
+
+ 
+
+Step 4: Final Output 
+
+Purpose: Produce a comprehensive, enriched FISMA-level Security Authorization score report. 
+
+Action: 
+
+Select and present Security Authorization scores and relevant FISMA attributes. 
+
+Output Table: 
+crma_hive.crma_hive_fismascorecard_fisma_system_security_authorization_score 
+
+Updated daily 
+
+Daily scores are appended to the table with ETL dates 
+
+ 
+
+SQL Scripts 
+
+FISMA Level scoring 
+
+WITH  
+
+-- Step 2.0: Select eligible systems 
+
+eligible_systems AS ( 
+
+    SELECT  csam.*, fisma.fisma_catagory, fisma.iscm_waiver, (SELECT MAX(dt) FROM unnest(csam.published_in_federal_register) as dt) as sorn_date 
+
+    FROM crma_hive.crma_hive_csam_systems_general_details_query csam 
+
+    left join crma_hive.crma_hive_snow_fismadetails fisma  
+
+    ON csam.system_id = fisma.csam_id AND trim(csam.fisma_id) = trim(fisma.fisma_id) 
+
+    WHERE csam.fisma_reportable = 'Yes' AND csam.system_operational_status = 'Operational'  
+
+    AND trim(fisma.fisma_catagory) in ('GSS','MAJ') 
+
+), 
+
+-- Step 2.1: Compute partial security authz checks 
+
+partial_securith_auth_checks AS( 
+
+    SELECT  
+
+    *, 
+
+    CASE 
+
+        WHEN s.ato_date IS NOT NULL  
+
+        AND s.ato_date <= current_date  
+
+        AND (s.ato_expiration IS NULL OR s.ato_expiration >= current_date ) 
+
+        THEN TRUE 
+
+        ELSE FALSE 
+
+    END AS auth_status_check, 
+
+    CASE 
+
+        WHEN s.document_review_approval_date_completed IS NOT NULL  
+
+        AND s.document_review_approval_date_completed <= current_date   
+
+        THEN TRUE 
+
+        ELSE FALSE 
+
+    END AS document_review_check,        
+
+    CASE 
+
+        WHEN s.contingency_plan_review_date_completed IS NOT NULL  
+
+        AND s.contingency_plan_review_date_completed <= current_date  
+
+        THEN TRUE 
+
+        ELSE FALSE 
+
+    END AS contingency_plan_check, 
+
+    CASE 
+
+        WHEN s.contingency_plan_test_review_date_completed IS NOT NULL  
+
+        AND s.contingency_plan_test_review_date_completed <= current_date  
+
+        AND s.contingency_plan_test_review_date_completed >= NOW() - INTERVAL '1 year'  
+
+        THEN TRUE 
+
+        ELSE FALSE 
+
+    END AS contingency_plan_test_check,      
+
+    CASE 
+
+        WHEN s.pta_ipa_date_completed IS NOT NULL 
+
+        AND TO_DATE(s.pta_ipa_date_completed, 'MM-DD-YYYY') <= current_date 
+
+        AND TO_DATE(s.pta_ipa_date_completed, 'MM-DD-YYYY') >= NOW() - INTERVAL '3 year'  
+
+        THEN TRUE 
+
+        ELSE FALSE 
+
+    END AS pta_valid, 
+
+    CASE 
+
+        WHEN trim(s.privacy_impact_assessment_status) = 'Required under E-Government Act' 
+
+        THEN TRUE 
+
+        ELSE FALSE 
+
+    END as pia_required, 
+
+    CASE 
+
+        WHEN trim(s.privacy_impact_assessment_status) = 'Required under E-Government Act' 
+
+        AND s.privacy_impact_assessment_date_completed IS NOT NULL 
+
+        AND s.privacy_impact_assessment_date_completed <= current_date 
+
+        THEN TRUE 
+
+        WHEN trim(s.privacy_impact_assessment_status) = 'Not Required under E-Government Act' 
+
+        THEN TRUE 
+
+        ELSE FALSE 
+
+    END AS pia_valid, 
+
+    CASE 
+
+        WHEN trim(s.system_of_records_notice) = 'Required under Privacy Act' 
+
+        THEN TRUE 
+
+        ELSE FALSE 
+
+    END as sorn_required,        
+
+    CASE 
+
+        WHEN trim(s.system_of_records_notice) = 'Required under Privacy Act' 
+
+        AND s.sorn_date IS NOT NULL  
+
+        AND s.sorn_date <= current_date  
+
+        THEN TRUE 
+
+        WHEN trim(s.system_of_records_notice) = 'Not Required under Privacy Act' 
+
+        THEN TRUE 
+
+        ELSE FALSE 
+
+    END AS sorn_valid 
+
+    FROM eligible_systems s 
+
+), 
+
+-- Step 2.2: Compute full security authz checks         
+
+full_securith_auth_checks AS( 
+
+    SELECT  
+
+    *, 
+
+    CASE  
+
+        WHEN s.pta_valid = TRUE 
+
+        AND (s.pia_required = FALSE OR s.pia_valid = TRUE) 
+
+        AND (s.sorn_required = FALSE OR s.sorn_valid = TRUE) 
+
+        THEN TRUE 
+
+        ELSE FALSE 
+
+    END as privacy_check 
+
+    FROM partial_securith_auth_checks s 
+
+), 
+
+-- Step 3.0: Compute full security authz checks            
+
+securith_authz_score AS( 
+
+    SELECT  
+
+    *, 
+
+    CASE 
+
+        WHEN s.auth_status_check = TRUE 
+
+        AND s.document_review_check = TRUE 
+
+        AND s.contingency_plan_check = TRUE 
+
+        AND s.contingency_plan_test_check = TRUE 
+
+        AND s.privacy_check = TRUE 
+
+        THEN 1 
+
+        ELSE 0 
+
+    END as score 
+
+    FROM full_securith_auth_checks s 
+
+)    
+
+SELECT  
+
+    fisma_id, 
+
+    system_name, 
+
+    org, 
+
+    sub_org as portfolio, 
+
+    acronym, 
+
+    high_value_asset as dhs_hva, 
+
+    fisma_reportable, 
+
+    fisma_catagory, 
+
+    system_category as fips_199_security_categorization_overall, 
+
+    system_operational_status as fisma_inventory_selc_status, 
+
+    cfo_designation as cfo_designated, 
+
+    contractor_system, 
+
+    iscm_waiver, 
+
+--  iscm_waiver_exp_date, 
+
+    ato_type, 
+
+    ato_date as authorization_date, 
+
+    ato_expiration, 
+
+    document_review_approval_date_completed as document_review_date, 
+
+    contingency_plan_date_completed as contingency_plan_date, 
+
+    contingency_plan_test_date_completed as contingency_plan_test_date, 
+
+    pta_ipa_date_completed as privacy_threshold_analysis_date, 
+
+    privacy_impact_assessment_date_completed as privacy_impact_assesment_date, 
+
+    pia_required, 
+
+    sorn_date, 
+
+    sorn_required, 
+
+    auth_status_check, 
+
+    document_review_check, 
+
+    contingency_plan_check, 
+
+    contingency_plan_test_check, 
+
+    privacy_check, 
+
+    pta_valid, 
+
+    pia_valid, 
+
+    sorn_valid, 
+
+    score as security_authz_score 
+
+FROM securith_authz_score 
+
+ 
+
+ 
+
+Scan Compliance 
+
+Requirements & Solution Design 
+
+See: fisma_scorecard_scan_compliance_score_solutions.docx 
+
+Implementation 
+
+FISMA System Level Scan Compliance score 
+
+Step 0: Input Datasets 
+
+crma_hive.crma_hive_fismascorecard_input_devices: Device inventory for FISMA Scorecard (primarily from Axonius). 
+
+crma_hive.crma_hive_snow_fismadetails: FISMA system attributes and context. 
+
+ 
+
+Step 1: Select Eligible Devices 
+
+Purpose: Identify devices relevant for scan compliance scoring. 
+
+Action: 
+Select devices seen in the current month (device_last_seen >= current_month_start) and with a device role of either 'ENDPOINT' or 'NETWORKING DEVICE'. 
+
+ 
+
+Step 2: Enrich Device Data with FISMA Details 
+
+Purpose: Add FISMA system context to eligible devices. 
+
+Action: 
+Join eligible devices to FISMA system details using fisma_id to append system attributes (e.g., acronym, portfolio, HVA status, etc.). 
+
+ 
+
+Step 3: Compute FISMA System Scan Compliance Scores 
+
+Purpose: Calculate scan compliance metrics for each FISMA system. 
+
+Action: 
+For each fisma_id, compute: 
+
+total_assets: Count of eligible devices. 
+
+total_credentialed_assets: Count of eligible devices with is_credentialed = TRUE. 
+
+scan_compliance_score: Percentage of credentialed assets ((total_credentialed_assets / total_assets) * 100). 
+
+Aggregate FISMA attributes (e.g., acronym, portfolio, etc.) for reporting. 
+
+ 
+
+Step 4: Final Output 
+
+Purpose: Produce a comprehensive, enriched FISMA-level scan compliance score report. 
+
+Action: 
+Select and present the following for each FISMA system: 
+
+FISMA attributes (acronym, name, portfolio, etc.) 
+
+total_credentialed_assets 
+
+total_assets 
+
+scan_compliance_score 
+
+Output Table: 
+crma_hive.crma_hive_fismascorecard_fisma_system_scan_compliance_score 
+
+Updated daily 
+
+Daily scores are appended to the table with ETL dates 
+
+ 
+
+Component Level Scan Compliance Score 
+
+Step 0: Input Datasets 
+
+crma_hive.crma_hive_fismascorecard_input_devices: Device inventory for FISMA Scorecard (primarily from Axonius). 
+
+crma_hive.crma_hive_snow_fismadetails: FISMA system attributes and context. 
+
+ 
+
+Step 1: Select Eligible Devices 
+
+Purpose: Identify devices relevant for component-level scan compliance scoring. 
+
+Action: 
+Select devices seen in the current month (device_last_seen >= current_month_start) and with a device role of either 'ENDPOINT' or 'NETWORKING DEVICE'. 
+
+ 
+
+Step 2: Enrich Device Data with FISMA Details and Filter for Eligible Systems 
+
+Purpose: Restrict to devices belonging to FISMA-reportable, operational, major applications (MAJ) or general support systems (GSS) without ISCM waivers. 
+
+Action: 
+Join eligible devices to FISMA system details using fisma_id. 
+Filter for: 
+
+fisma_reportable = 'yes' 
+
+fisma_catagory in ('MAJ', 'GSS') 
+
+fisma_inventory_selc_status = 'Operational' 
+
+iscm_waiver = 'no' 
+
+ 
+
+Step 3: Compute Component Scan Compliance Score 
+
+Purpose: Calculate scan compliance metrics at the component level. 
+
+Action: 
+For the specified component (e.g., 'ICE'): 
+
+total_assets: Count of eligible devices. 
+
+total_credentialed_assets: Count of eligible devices with is_credentialed = TRUE. 
+
+scan_compliance_score: Percentage of credentialed assets ((total_credentialed_assets / total_assets) * 100). 
+
+ 
+
+Step 4: Final Output 
+
+Purpose: Produce a comprehensive, component-level scan compliance score report. 
+
+Action: 
+Select and present the following for the component: 
+
+component 
+
+total_credentialed_assets 
+
+total_assets 
+
+scan_compliance_score 
+
+Output Table: 
+crma_hive.crma_hive_fismascorecard_component_scan_compliace_score 
+
+Updated daily 
+
+Daily scores are appended to the table with ETL dates 
+
+ 
+
+SQL Scrips 
+
+FISMA Level Scoring 
+
+WITH  
+
+-- Step 1: Select Eligible devices 
+
+deduped_devices AS ( 
+
+    -- Step 1.1: dedup 
+
+    SELECT * 
+
+    FROM ( 
+
+        SELECT *, 
+
+            ROW_NUMBER() OVER ( 
+
+                PARTITION BY asset_id 
+
+                ORDER BY device_last_seen DESC 
+
+            ) AS asset_rn 
+
+        FROM crma_hive.crma_hive_fismascorecard_input_devices  
+
+        WHERE asset_id IS NOT NULL 
+
+    ) ranked 
+
+    WHERE asset_rn = 1  
+
+    UNION ALL 
+
+    SELECT *, 
+
+        NULL AS asset_rn 
+
+    FROM crma_hive.crma_hive_fismascorecard_input_devices  
+
+    WHERE asset_id IS NULL 
+
+), 
+
+eligible_devices AS ( 
+
+    -- Step 1.2: apply eligibility filters 
+
+    SELECT  
+
+        device_id, 
+
+        fisma_id, 
+
+        devicerole, 
+
+        device_last_seen, 
+
+        asset_id, 
+
+        is_credentialed, 
+
+        last_authenticated_scan_date 
+
+    FROM  deduped_devices 
+
+    WHERE device_last_seen >= %(current_month_start)s  
+
+        AND devicerole IN ('ENDPOINT','NETWORKING DEVICE') 
+
+), 
+
+-- Step 2: Erich device data with FISMA details 
+
+fisma_enriched_eligible_devices AS( 
+
+    SELECT  
+
+        d.device_id, 
+
+        d.fisma_id, 
+
+        f.acronym, 
+
+        f.fisma_name, 
+
+        f.security_support_portfolio AS portfolio, 
+
+        f.dhs_hva, 
+
+        f.public_facing, 
+
+        f.cfo_designated, 
+
+        f.fips_199_security_categorization_overall, 
+
+        f.active, 
+
+        f.iscm_waiver,  
+
+        f.fisma_reportable, 
+
+        f.fisma_inventory_selc_status, 
+
+        f.fisma_category, 
+
+        d.devicerole, 
+
+        d.device_last_seen, 
+
+        d.asset_id, 
+
+        d.is_credentialed, 
+
+        d.last_authenticated_scan_date 
+
+    FROM  eligible_devices d 
+
+    LEFT JOIN crma_hive.crma_hive_snow_fismadetails f 
+
+    ON d.fisma_id = f.fisma_id  
+
+), 
+
+-- Step 3: compute FISMA system scores 
+
+fisma_scan_compliance_score AS ( 
+
+    SELECT 
+
+        fisma_id, 
+
+        MAX(acronym) AS acronym, 
+
+        MAX(fisma_name) AS fisma_name, 
+
+        MAX(portfolio) AS portfolio, 
+
+        MAX(dhs_hva) AS dhs_hva, 
+
+        MAX(public_facing) AS public_facing, 
+
+        MAX(cfo_designated) AS cfo_designated , 
+
+        MAX(fips_199_security_categorization_overall) AS fips_199_security_categorization_overall, 
+
+        BOOL_OR(active) AS active, 
+
+        MAX(iscm_waiver) AS iscm_waiver,  
+
+        MAX(fisma_reportable) AS fisma_reportable, 
+
+        MAX(fisma_inventory_selc_status) AS fisma_inventory_selc_status, 
+
+        MAX(fisma_category) AS fisma_category, 
+
+        COUNT(*) AS total_assets, 
+
+        COUNT(*) FILTER (WHERE is_credentialed) AS total_credentialed_assets, 
+
+        CAST( 
+
+            (COUNT(*) FILTER (WHERE is_credentialed)::float / COUNT(*)::float) * 100 
+
+            AS INT 
+
+        ) AS scan_compliance_score 
+
+    FROM fisma_enriched_eligible_devices 
+
+    GROUP BY fisma_id 
+
+) 
+
+SELECT  
+
+    fisma_id, 
+
+    acronym, 
+
+    fisma_name, 
+
+    portfolio, 
+
+    dhs_hva, 
+
+    public_facing, 
+
+    cfo_designated , 
+
+    fips_199_security_categorization_overall, 
+
+    active, 
+
+    iscm_waiver,  
+
+    fisma_reportable, 
+
+    fisma_inventory_selc_status, 
+
+    fisma_category, 
+
+    total_credentialed_assets, 
+
+    total_assets,    
+
+    scan_compliance_score 
+
+FROM fisma_scan_compliance_score 
+
+ 
+
+ 
+
+Component Level Scoring  
+
+WITH  
+
+-- Step 1: Select Eligible devices 
+
+eligible_devices AS ( 
+
+    SELECT  
+
+        device_id, 
+
+        fisma_id, 
+
+        devicerole, 
+
+        device_last_seen, 
+
+        asset_id, 
+
+        is_credentialed, 
+
+        last_authenticated_scan_date 
+
+    FROM  crma_hive.crma_hive_fismascorecard_input_devices  
+
+        WHERE device_last_seen >=  %(current_month_start)s  
+
+    AND devicerole IN ('ENDPOINT','NETWORKING DEVICE') 
+
+), 
+
+-- Step 2: Erich device data with FISMA details and filter for elibible fisma systems 
+
+fisma_enriched_eligible_devices AS( 
+
+    SELECT  
+
+        d.device_id, 
+
+        d.fisma_id, 
+
+        f.acronym, 
+
+        f.fisma_name, 
+
+        f.security_support_portfolio AS portfolio, 
+
+        f.dhs_hva, 
+
+        f.public_facing, 
+
+        f.cfo_designated, 
+
+        f.fips_199_security_categorization_overall, 
+
+        f.active, 
+
+        f.iscm_waiver,  
+
+        f.fisma_reportable, 
+
+        f.fisma_inventory_selc_status, 
+
+        f.fisma_catagory, 
+
+        d.devicerole, 
+
+        d.device_last_seen, 
+
+        d.asset_id, 
+
+        d.is_credentialed, 
+
+        d.last_authenticated_scan_date 
+
+    FROM  eligible_devices d 
+
+    LEFT JOIN crma_hive.crma_hive_snow_fismadetails f 
+
+    ON d.fisma_id = f.fisma_id  
+
+    WHERE fisma_reportable iLike 'yes' 
+
+        AND fisma_catagory in ('MAJ', 'GSS') 
+
+        AND fisma_inventory_selc_status iLike 'Operational' 
+
+        AND COALESCE(iscm_waiver, '') not ILIKE 'yes' 
+
+   
+
+), 
+
+component_scan_compliance_score AS ( 
+
+    SELECT 
+
+        'ICE' AS component, 
+
+        COUNT(*) AS total_assets, 
+
+        COUNT(*) FILTER (WHERE is_credentialed) AS total_credentialed_assets, 
+
+        CAST( 
+
+            (COUNT(*) FILTER (WHERE is_credentialed)::float / COUNT(*)::float) * 100 
+
+            AS INT 
+
+        ) AS scan_compliance_score 
+
+    FROM fisma_enriched_eligible_devices 
+
+) 
+
+SELECT  
+
+    component, 
+
+    total_credentialed_assets, 
+
+    total_assets,    
+
+    scan_compliance_score 
+
+FROM component_scan_compliance_score 
+
+ 
+
+ 
+
+ 
+
+ 
+
+Aggregated Metrics 
+
+Implementation 
+
+FISMA SYSTEM Level Aggregated Metrics 
+
+Step 0: Input Datasets 
+
+crma_hive.crma_hive_snow_fismadetails: FISMA system attributes and context. 
+
+crma_hive.crma_hive_fismascorecard_fisma_system_vm_score: FISMA system-level Vulnerability Management (VM) scores. 
+
+crma_hive.crma_hive_fismascorecard_fisma_system_cm_score: FISMA system-level Configuration Management (CM) scores. 
+
+crma_hive.crma_hive_fismascorecard_fisma_system_swam_score: FISMA system-level Software Asset Management (SWAM) scores. 
+
+crma_hive.crma_hive_fismascorecard_fisma_system_hwam_score: FISMA system-level Hardware Asset Management (HWAM) scores. 
+
+crma_hive.crma_hive_fismascorecard_fisma_system_hbd_score: FISMA system-level Host-Based Defense (HBD) scores. 
+
+crma_hive.crma_hive_fismascorecard_fisma_system_prohibited_os_score: FISMA system-level Prohibited OS scores. 
+
+crma_hive.crma_hive_fismascorecard_fisma_system_security_authz_score: FISMA system-level Security Authorization scores. 
+
+ 
+
+Step 1: Aggregate Metrics per FISMA System 
+
+Purpose: Produce a comprehensive, single-row summary of all key metrics for each FISMA system. 
+
+Action: 
+
+Join FISMA system details with each metric score table using FISMA ID and ETL date. 
+
+Select and present the following metrics for each FISMA system: 
+
+VM score 
+
+CM score 
+
+SWAM score 
+
+HWAM score 
+
+HBD score 
+
+Prohibited OS score 
+
+Security Authorization score 
+
+Output Table: 
+crma_hive.crma_hive_fismascorecard_fisma_system_all_metrics_scores 
+
+Updated daily 
+
+Daily scores are appended to the table with ETL dates 
+
+ 
+
+Component Level Aggregated Metrics 
+
+Step 0: Input Datasets 
+
+crma_hive.crma_hive_fismascorecard_device_vm_score: Device-level vulnerability management scores. 
+
+crma_hive.crma_hive_fismascorecard_device_cm_score: Device-level configuration management scores. 
+
+crma_hive.crma_hive_fismascorecard_device_swam_score: Device-level software asset management scores. 
+
+crma_hive.crma_hive_fismascorecard_device_hbd_score: Device-level hardware baseline deviation scores. 
+
+crma_hive.crma_hive_fismascorecard_device_prohibited_os_score: Device-level prohibited operating system counts. 
+
+crma_hive.crma_hive_fismascorecard_component_hwam_score: Component-level hardware asset management scores. 
+
+crma_hive.crma_hive_fismascorecard_fisma_system_security_authz_score: FISMA system-level security authorization scores. 
+
+crma_hive.crma_hive_fismascorecard_component_scan_compliance_score: Component-level scan compliance scores. 
+
+Step 1: Filter for Eligible Systems and Devices 
+
+Purpose: Restrict scoring to devices and systems that are FISMA-reportable, operational, and not under ISCM waiver, focusing on major applications (MAJ) and general support systems (GSS). 
+
+Action: 
+For each metric, filter records where: 
+
+fisma_reportable = 'yes' 
+
+fisma_catagory in ('MAJ', 'GSS') 
+
+fisma_inventory_selc_status = 'Operational' 
+
+iscm_waiver = 'no' 
+
+etl_date = specified ETL date 
+
+Step 2: Calculate Component Scores 
+
+Purpose: Aggregate and summarize key security and compliance metrics at the component level. 
+
+Action: 
+For the specified component (e.g., 'ICE'), calculate: 
+
+Vulnerability Management Score (vm_score): 
+Average of vm_score across eligible devices, cast to integer. 
+
+Configuration Management Score for HVA (cm_score_hva): 
+Average of cm_score for High Value Assets (dhs_hva = 'yes'), cast to integer. 
+
+Configuration Management Score for Other Systems (cm_score_other): 
+Average of cm_score for non-HVA or null HVA systems, cast to integer. 
+
+Software Asset Management Score (swam_score): 
+Average of swam_score across eligible devices, multiplied by 100 and cast to integer. 
+
+Hardware Baseline Deviation Score (hbd_score): 
+Average of hbd_score across eligible devices, cast to integer. 
+
+Prohibited OS Count (prohibited_os): 
+Sum of prohibited_os_score across eligible devices. 
+
+Hardware Asset Management Score (hwam_score): 
+Latest hwam_score from the component-level HWAM score table. 
+
+Security Authorization Score for HVA (security_authz_score_hva): 
+Average of security_authz_score for HVA systems, multiplied by 100 and cast to integer. 
+
+Security Authorization Score for Other Systems (security_authz_score_other): 
+Average of security_authz_score for non-HVA or null HVA systems, multiplied by 100 and cast to integer. 
+
+Scan Compliance Score (scan_compliance_score): 
+Latest scan_compliance_score from the component-level scan compliance score table. 
+
+ 
+
+Step 3: Final Output 
+
+Purpose: Produce a comprehensive, component-level security and compliance scorecard. 
+
+Action: 
+Select and present the following for the component: 
+
+component 
+
+vm_score 
+
+cm_score_hva 
+
+cm_score_other 
+
+swam_score 
+
+hwam_score 
+
+hbd_score 
+
+prohibited_os 
+
+security_authz_score_hva 
+
+security_authz_score_other 
+
+scan_compliance_score 
+
+Output Table: 
+crma_hive.crma_hive_fismascorecard_component_all_metrics_scores 
+
+Updated daily 
+
+Daily scores are appended to the table with ETL dates 
+
+ 
+
+SQL Scripts 
+
+FISMA System Level 
+
+        SELECT  
+
+            fs.fisma_id, 
+
+            fs.fisma_name, 
+
+            fs.acronym, 
+
+            fs.security_support_portfolio AS portfolio, 
+
+            fs.active, 
+
+            fs.fisma_reportable, 
+
+            fs.iscm_waiver, 
+
+            fs.fisma_catagory As fisma_category, 
+
+            fs.fisma_inventory_selc_status, 
+
+            fs.dhs_hva, 
+
+            fs.public_facing, 
+
+            fs.cfo_designated, 
+
+            fs.fips_199_security_categorization_overall, 
+
+            vm.vm_score, 
+
+            cm.cm_score, 
+
+            sw.swam_score, 
+
+            hw.hwam_score, 
+
+            hb.hbd_score, 
+
+            po.prohibited_os_score, 
+
+            so.security_authz_score  
+
+        FROM crma_hive.crma_hive_snow_fismadetails fs 
+
+        LEFT JOIN crma_hive.crma_hive_fismascorecard_fisma_system_vm_score vm 
+
+                ON fs.fisma_id=vm.fisma_id AND vm.etl_date= %(etl_date)s 
+
+        LEFT JOIN crma_hive.crma_hive_fismascorecard_fisma_system_cm_score cm 
+
+                ON fs.fisma_id=cm.fisma_id AND cm.etl_date= %(etl_date)s         
+
+        LEFT JOIN crma_hive.crma_hive_fismascorecard_fisma_system_swam_score sw 
+
+                ON fs.fisma_id=sw.fisma_id AND sw.etl_date= %(etl_date)s 
+
+        LEFT JOIN crma_hive.crma_hive_fismascorecard_fisma_system_hwam_score hw 
+
+                ON fs.fisma_id=hw.fisma_id AND hw.etl_date= %(etl_date)s 
+
+        LEFT JOIN crma_hive.crma_hive_fismascorecard_fisma_system_hbd_score hb 
+
+                ON fs.fisma_id=hb.fisma_id AND hb.etl_date= %(etl_date)s 
+
+        LEFT JOIN crma_hive.crma_hive_fismascorecard_fisma_system_prohibited_os_score po 
+
+                ON fs.fisma_id=po.fisma_id AND po.etl_date= %(etl_date)s 
+
+        LEFT JOIN crma_hive.crma_hive_fismascorecard_fisma_system_security_authz_score so 
+
+                ON fs.fisma_id=so.fisma_id AND so.etl_date= %(etl_date)s 
+
+    """ 
+
+ 
+
+Component Level 
+
+WITH  
+
+component_scores AS ( 
+
+    SELECT 
+
+        'ICE' AS component, 
+
+        CAST(( 
+
+            SELECT AVG(vm_score)  
+
+            FROM crma_hive.crma_hive_fismascorecard_device_vm_score  
+
+            WHERE fisma_reportable iLike 'yes' 
+
+                AND fisma_catagory in ('MAJ', 'GSS') 
+
+                AND fisma_inventory_selc_status iLike 'Operational' 
+
+                AND COALESCE(iscm_waiver, '') not ILIKE '%yes%' 
+
+                AND etl_date = %(etl_date)s 
+
+        ) AS INTEGER) AS vm_score, 
+
+     
+
+        CAST(( 
+
+            SELECT AVG(cm_score)  
+
+            FROM crma_hive.crma_hive_fismascorecard_device_cm_score  
+
+            WHERE fisma_reportable iLike 'yes' 
+
+                AND fisma_catagory in ('MAJ', 'GSS') 
+
+                AND fisma_inventory_selc_status iLike 'Operational' 
+
+                AND COALESCE(iscm_waiver, '') not ILIKE '%yes%' 
+
+                AND dhs_hva iLike 'yes' 
+
+                AND etl_date = %(etl_date)s 
+
+        ) AS INTEGER) AS cm_score_hva, 
+
+     
+
+        CAST(( 
+
+                SELECT AVG(cm_score)  
+
+                FROM crma_hive.crma_hive_fismascorecard_device_cm_score  
+
+                WHERE fisma_reportable iLike 'yes' 
+
+                    AND fisma_catagory in ('MAJ', 'GSS') 
+
+                    AND fisma_inventory_selc_status iLike 'Operational' 
+
+                    AND COALESCE(iscm_waiver, '') not ILIKE '%yes%' 
+
+                    AND (dhs_hva iLike 'no' OR dhs_hva IS NULL) 
+
+                    AND etl_date = %(etl_date)s 
+
+        ) AS INTEGER) AS cm_score_other, 
+
+ 
+
+        CAST(( 
+
+                SELECT AVG(swam_score)*100  
+
+                FROM crma_hive.crma_hive_fismascorecard_device_swam_score  
+
+                WHERE fisma_reportable iLike 'yes' 
+
+                    AND fisma_catagory in ('MAJ', 'GSS') 
+
+                    AND fisma_inventory_selc_status iLike 'Operational' 
+
+                    AND COALESCE(iscm_waiver, '') not ILIKE '%yes%' 
+
+                    AND etl_date = %(etl_date)s 
+
+        ) AS INTEGER) AS swam_score, 
+
+     
+
+        CAST(( 
+
+                SELECT AVG(hbd_score) 
+
+                FROM crma_hive.crma_hive_fismascorecard_device_hbd_score  
+
+                WHERE fisma_reportable iLike 'yes' 
+
+                    AND fisma_catagory in ('MAJ', 'GSS') 
+
+                    AND fisma_inventory_selc_status iLike 'Operational' 
+
+                    AND COALESCE(iscm_waiver, '') not ILIKE '%yes%' 
+
+                    AND etl_date = %(etl_date)s 
+
+        ) AS INTEGER) AS hbd_score,  
+
+ 
+
+        ( 
+
+            SELECT SUM(prohibited_os_score) 
+
+            FROM  crma_hive.crma_hive_fismascorecard_device_prohibited_os_score 
+
+            WHERE fisma_reportable iLike 'yes' 
+
+                AND fisma_catagory in ('MAJ', 'GSS') 
+
+                AND fisma_inventory_selc_status iLike 'Operational' 
+
+                AND COALESCE(iscm_waiver, '') not ILIKE '%yes%' 
+
+                AND etl_date = %(etl_date)s 
+
+        )  AS prohibited_os,     
+
+ 
+
+        (SELECT hwam_score 
+
+            FROM crma_hive.crma_hive_fismascorecard_component_hwam_score 
+
+            WHERE etl_date = %(etl_date)s 
+
+        ) AS hwam_score,     
+
+ 
+
+        CAST(( 
+
+            SELECT AVG(security_authz_score) * 100 
+
+            FROM crma_hive.crma_hive_fismascorecard_fisma_system_security_authz_score 
+
+            WHERE fisma_reportable iLike 'yes' 
+
+                AND fisma_catagory in ('MAJ', 'GSS') 
+
+                AND fisma_inventory_selc_status iLike 'Operational' 
+
+                AND dhs_hva iLike 'yes' 
+
+                AND etl_date = %(etl_date)s  
+
+        ) AS INTEGER) AS security_authz_score_hva, 
+
+     
+
+        CAST(( 
+
+            SELECT AVG(security_authz_score) * 100 
+
+            FROM crma_hive.crma_hive_fismascorecard_fisma_system_security_authz_score 
+
+            WHERE fisma_reportable iLike 'yes' 
+
+                AND fisma_catagory in ('MAJ', 'GSS') 
+
+                AND fisma_inventory_selc_status iLike 'Operational' 
+
+                AND (dhs_hva iLike 'no' OR  dhs_hva IS NULL ) 
+
+                AND etl_date = %(etl_date)s  
+
+        ) AS INTEGER) AS security_authz_score_other, 
+
+         
+
+        ( 
+
+            SELECT scan_compliance_score 
+
+            FROM crma_hive.crma_hive_fismascorecard_component_scan_compliance_score  
+
+            WHERE etl_date = %(etl_date)s    
+
+        ) AS scan_compliance_score   
+
+ 
+
+) 
+
+SELECT  
+
+    component, 
+
+    vm_score, 
+
+    cm_score_hva, 
+
+    cm_score_other, 
+
+    swam_score, 
+
+    hwam_score, 
+
+    hbd_score, 
+
+    prohibited_os, 
+
+    security_authz_score_hva, 
+
+    security_authz_score_other, 
+
+    scan_compliance_score 
+
+FROM component_scores 
+
+ 
