@@ -1,0 +1,2275 @@
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+Security HIVE Data Platform Architecture Document 
+
+ 
+
+ 
+
+ 
+
+Updated on: 07/16/2026 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+Security HIVE Overview 
+
+(High-level summary of the HIVE, outlining its: 
+
+Purpose 
+
+Key goals and objectives 
+
+Scope   
+
+Business impact 
+
+Etc )      
+
+ 
+
+Architecture 
+
+The following diagram is an overview of the current architecture of the ETL pipeline used by CRMA HIVE.  
+
+ 
+
+Components 
+
+Amazon S3:  
+
+Raw Data Storage - Stores ingested raw data from external sources for initial processing. 
+
+Processed Data Storage - Holds cleaned, quarantined, as well as data with warnings  
+
+Lifecycle Policy - Archives raw and processed data into AWS S3 Glacier for long-term historical data retention purposes 
+
+AWS Secrets Manager – Stores credentials for external APIs, S3 buckets, and the target RDS database, ensuring sensitive information is protected and accessible only by authorized services. 
+
+AWS Glue Jobs - Ingest raw data, process and classify, load processed data to target database, and extract, parse and normalize records to generate records for derived datasets. 
+
+AWS RDS – Contains the crma_hive schema, tables, and views used to store the processed, quarantined, and warnings datasets 
+
+AWS CloudWatch - Aggregates application logs from glue jobs. Supports debugging and troubleshooting efforts 
+
+AWS EventBridge/SNS – Monitors and alert dev team on pipeline success and failures. 
+
+Infrastructure Overview 
+
+The ETL pipeline is deployed in the AWS cloud environment, leveraging managed services for scalability and reliability. Infrastructure provisioning is automated using Infrastructure as Code (IaC) with Terraform, ensuring consistent and repetable deployments. For source code managment and version control, the team uses GitHub, which enables collaboration and semless update to the pipeline. Continuous Integration and Continuous Deployment (CI/CD) are managed via Jenkins, orchestrating a structed deployment process. This process includes running unit tests to verify the correctness of Glue ETL scripts, scanning the infrastructure code to identify potential security risks, and finally deploying resources to the AWS environment. For a detailed list of AWS resources deployed view HIVE - AWS Infrastructure.xlsx 
+
+ 
+
+Workflows, Pipeline Actions, Wiand Workflow Steps 
+
+Workflows 
+
+The Security HIVE system, currently, supports two independent workflows: 
+
+SNOW data onboarding workflow: An ETL pipeline designed specifically for onboarding, processing and loading ServiceNow datasets to the HIVE destination system. 
+
+MOBIUS data onboarding workflow: An ETL pipeline dedicated to onboarding, processing, and loading MOBIUS datasets to the HIVE destination system.  
+
+CSAM data onboarding workflow: An ETL pipeline dedicated to onboarding, processing, and loading MOBIUS datasets to the HIVE destination system.    
+
+AXONIUS data onboarding workflow: An ETL pipeline dedicated to onboarding, processing, and loading AXONIUS datasets to HIVE destination system.  
+
+POAM Audit Controls Tred Workflow: A dedicated pipeline for extracting POAM Audit  Controls data from multiple source tables, consolidating the information, and appending it to a historical table  
+
+Data Onbaording Pipelines Actions  
+
+All Security HIVE data onbaording workflows take the following pipeline action to  efficiently ingest, process, and store data while ensuring data quality and compliance with business requirements. 
+
+get raw glue job:  
+
+Ingests external data and stores it in the S3 raw bucket in parquet format  
+
+process glue job: 
+
+Retrieves raw data from the S3 raw bucket 
+
+Applies relevant data quality and business rules to clean and enrich records in the datasets  
+
+Classifies records into three categories based on data quality and business rule validation: 
+
+Clean: Records that pass all data quality checks and comply fully with business rules, ensuring they are error-free and ready for downstream processing. 
+
+Quarantine: Records that contain errors or violate data quality standards or business rules, requiring further review or remediation. 
+
+Warning: Records that do not fail outright but exhibit anomalies or inconsistencies that warrant further investigation 
+
+Loads datasets into the S3 processed bucket according to their classification 
+
+load glue job: 
+
+Retrieves data from the S3 processed storage 
+
+Validates referential integrity of records  
+
+Loads datasets into the target RDS database tables, using `DEFERABLE on FK ` loading strategy to ensure relational integrity of datasets, following the following three stages:  
+
+Load  
+
+Create temp tables – staged tables  
+
+Load the clean data into staged tables  
+
+Create temp table for orphan records – orphan tables  
+
+Create temp table for staged minus orphan records – compliant tables  
+
+Post-Load (single transaction w/ deferred constraint checks)  
+
+Truncate the base tables   
+
+Insert data from compliant tables into base tables  
+
+Insert data from orphan tables into quarantine table  
+
+Refresh materialized views  
+
+Commit transaction  
+
+On commit failure or constraint violation  
+
+All changes made in commit will be rolled back to state before commit was made. 
+
+normalize glue job: 
+
+Accesses clean data from the target database 
+
+Parses and extracts fields where necessary  
+
+Generates records for derived datasets based on business requirements 
+
+Loades the generated tables to the target database 
+
+ 
+
+Workflow Steps 
+
+ 
+
+Historical Data mainitaining Pipelines Actions 
+
+A single AWS Glue job is responsible for managing the historical data pipeline. This job extracts data from the designated source tables and loads it into the destination historical table. Throughout the process, the pipeline ensures that only a single copy of each data record is maintained, supporting data integrity and consistency in the historical repository. 
+
+Workflow Steps 
+
+ 
+
+ 
+
+Destination Database Overview 
+
+RDS Instance:  eda-dive-np.cqxg4wshaxwj.us-gov-west-1.rds.amazonaws.com 
+
+Database: vetdb_fqt 
+
+Schema: crma_hive 
+
+Onboarded Datasets 
+
+This section provides an overview of the datasets integrated into the ETL pipeline to date, detailing their origins, structure, and data quality rules applied to them.  
+
+POAM Data 
+
+Source system:  ServiceNow 
+
+Table: x_g_dh5_poam_csam_poam_data 
+
+Table API endpoint: https://iceserviceportal.servicenowservices.com/api/now/table/x_g_dh5_poam_csam_poam_data 
+
+Description:  
+
+Hosts Centralized GRC Tool of record (CSAM) core data, including POAMs and System Security Information (ATO required info) 
+
+Data Quality Rules: 
+
+ Standardize the following date fields to ISO 8601 format:  
+
+actual_finish_date 
+
+actual_start_date 
+
+create_date  
+
+date_due 
+
+issoupdate 
+
+planned_finish_date 
+
+planned_start_date 
+
+scheduled_completion_date 
+
+workflow_status_date 
+
+Standardize the following timestamp fields to ISO 8601 timestamp format:   
+
+sys_created_on   
+
+sys_updated_on  
+
+Convert the following numeric fields to Integer 
+
+poam_id 
+
+csam_id 
+
+days_since_creation 
+
+days_until_auto_approved 
+
+number_artifacts 
+
+number_milestones 
+
+system_poam_impact 
+
+expiring_in_days 
+
+Convert the following numeric fields to Float/Decimal 
+
+cost 
+
+Remove HTML tags from the following fields 
+
+detailed_weakness_description 
+
+isso_status_history 
+
+Quarantine record if one or more of the following fields are null 
+
+poam_id 
+
+Status 
+
+sys_id 
+
+fisma_name_id 
+
+system_category 
+
+system_name 
+
+Quarantine record if one or more of the following fields have duplicates  
+
+sys_id 
+
+poam_id 
+
+Add record to warning if one or more of the following fields have null 
+
+acronym 
+
+csam_id 
+
+Data Profile Report 
+
+ snow_poam_data_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_snow_poam_data 
+
+Quarantined records: crma_hive.crma_hive_snow_poam_data_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_snow_poam_data_warning 
+
+POAM Audit 
+
+Source system:  ServiceNow 
+
+Table:  x_g_dh5_poam_csam_poam_audit_types   
+
+Table API endpoint: https://iceserviceportal.servicenowservices.com/api/now/table/x_g_dh5_poam_csam_poam_audit_types  
+
+Description:  
+
+Contains POA&M data stored in CSAM/ServiceNOW POA&M table, with enriched fields in ServiceNOW which help identify, categorize, and track audit related POA&M details. FISCAM/CEM controls are detailed here as well.                    
+
+Data Quality Rules: 
+
+ Standardize the following timestamp fields to ISO 8601 timestamp format:   
+
+sys_updated_on  
+
+Quarantine record if one or more of the following fields are null 
+
+sys_id 
+
+audit_type 
+
+csam_poam_data_id  
+
+Add record to warning if one or more of the following fields have null 
+
+audit_year 
+
+Data Profile Report: 
+
+ snow_poam_audit_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_snow_poam_audit 
+
+Quarantined records: crma_hive.crma_hive_snow_poam_audit_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_snow_poam_data_warning 
+
+Fisma Inventory 
+
+Source system:  ServiceNow 
+
+Table: u_fisma_inventory 
+
+Table API endpoint: https://iceserviceportal.servicenowservices.com/api/now/table/u_fisma_inventory 
+
+Description:  
+
+ServiceNOW hosts our FISMA Inventory, which is a list of all ICE “FISMA” systems. This data includes all data points related to systems and helps us map various data sources together by their ownership.                      
+
+Data Quality Rules: 
+
+Standardize the following timestamp fields to ISO 8601 timestamp format:   
+
+sys_created_on   
+
+sys_updated_on  
+
+Convert the following numeric fields to Integer 
+
+csam_id 
+
+Normalize boolean fields 
+
+active 
+
+notificationsent_14days 
+
+Quarantine record if one or more of the following fields are null 
+
+fisma_id 
+
+fisma_name 
+
+acronym 
+
+sys_id 
+
+Quarantine record if one or more of the following fields have duplicates  
+
+fisma_id 
+
+sys_id 
+
+Add record to warning if one or more of the following fields have null 
+
+csam_id 
+
+Data Profile Report 
+
+ snow_fisma_inventory_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_snow_fismadetails 
+
+Quarantined records: crma_hive.crma_hive_snow_fismadetails_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_snow_fismadetails_warning 
+
+System User 
+
+Source system:  ServiceNow 
+
+Table:  sys_user 
+
+Table API endpoint: https://iceserviceportal.servicenowservices.com/api/now/table/sys_user 
+
+ 
+
+Description:  
+
+This is an embedded table in ServiceNOW which contains contact information for user accounts in ServiceNOW. Limited data is being pulled from this table to ensure SPII is not captured.                
+
+Notes: 
+
+In the current implementation only the following fields are ingested: 
+
+sys_id 
+
+name 
+
+email 
+
+Data Quality Rules: 
+
+ Clean and validate names 
+
+Clean and validate emails   
+
+Quarantine record if one or more of the following fields are null 
+
+sys_id 
+
+name 
+
+Add record to warning if one or more of the following fields have null 
+
+email 
+
+Data Profile Report 
+
+ snow_sys_user_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_snow_sys_user 
+
+Quarantined records: crma_hive.crma_hive_snow_sys_user_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_snow_sys_user_warning 
+
+Programs 
+
+Source system:  ServiceNow 
+
+Table:  u_program 
+
+Table API endpoint: https://iceserviceportal.servicenowservices.com/api/now/table/u_program  
+
+Description:  
+
+                  
+
+ 
+
+Data Quality Rules: 
+
+ Standardize the following timestamp fields to ISO 8601 timestamp format:   
+
+sys_created_on 
+
+sys_updated_on  
+
+Convert the following numeric fields to Integer 
+
+sys_mod_count 
+
+Normalize boolean fields 
+
+in_use 
+
+Quarantine record if one or more of the following fields are null 
+
+sys_id 
+
+Add record to warning if one or more of the following fields have null 
+
+name  
+
+Data Profile Report 
+
+ snow_program_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_snow_program 
+
+Quarantined records: crma_hive.crma_hive_snow_program_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_snow_program_warning 
+
+ITSR Request 
+
+Source system:  ServiceNow 
+
+Table:  sc_request 
+
+Table API endpoint: https://iceserviceportal.servicenowservices.com/api/now/table/sc_request 
+
+ 
+
+Description:  
+
+The ITSR table holds all Software and Hardware requests that are made at ICE. The requests are made for teams to either request new software to be evaluated or used at ICE, and also are used to request access to already approved software used at ICE.                             
+
+Data Quality Rules: 
+
+Standardize the following date fields to ISO 8601 date format:   
+
+due_date 
+
+Standardize the following timestamp fields to ISO 8601 timestamp format:   
+
+sys_created_on 
+
+sys_updated_on  
+
+approval_set 
+
+Convert the following numeric fields to Integer 
+
+priority 
+
+urgency 
+
+Convert the following numeric fields to float/decimal 
+
+price 
+
+Normalize boolean fields 
+
+active 
+
+yn_associated_project 
+
+Quarantine record if one or more of the following fields are null 
+
+sys_id 
+
+number 
+
+price 
+
+Add record to warning if one or more of the following fields have null 
+
+stage 
+
+Data Profile Report 
+
+ snow_sc_requests_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_snow_request 
+
+Quarantined records: crma_hive.crma_hive_snow_request_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_snow_request_warning 
+
+Change Request 
+
+Source system:  ServiceNow 
+
+Table:  change_request 
+
+Table API endpoint: https://iceserviceportal.servicenowservices.com/api/now/table/change_request 
+
+Description:  
+
+The IT Change Request (ITCR) table contains review results for non-standard hardware/software requests (i.e. not approved for use in the ICE environment), as well as end-of-life/sale hardware/software. Each product is manually reviewed and ultimately approved or denied.                         
+
+Data Quality Rules: 
+
+Standardize the following date fields to ISO 8601 date format:   
+
+cab_date  
+
+Standardize the following timestamp fields to ISO 8601 timestamp format:   
+
+opened_at 
+
+start_date   
+
+sys_created_on 
+
+sys_updated_on   
+
+submitted_date  
+
+closed_at   
+
+end_date 
+
+Convert the following numeric fields to Integer 
+
+impact 
+
+priority  
+
+state    
+
+Normalize boolean fields 
+
+application_release 
+
+front_end 
+
+ic_notification 
+
+is_this_related_to_another_cr 
+
+Outage 
+
+staging_testing_environment_verified  
+
+Quarantine record if one or more of the following fields are null 
+
+sys_id 
+
+number 
+
+state 
+
+Quarantine record if one or more of the following fields have duplicates 
+
+sys_id 
+
+number 
+
+Add record to warning if one or more of the following fields have null 
+
+description 
+
+impact 
+
+implementation_plan 
+
+request_reason 
+
+location_id 
+
+requested_by_id 
+
+risk 
+
+risk_impact_analysis   
+
+short_description   
+
+test_plan   
+
+type   
+
+post_implementation_test_plan 
+
+Data Profile Report 
+
+ snow_change_request_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_snow_change_request 
+
+Quarantined records: crma_hive.crma_hive_snow_change_request_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_snow_change_request_warning 
+
+Configuration Item 
+
+Source system:  ServiceNow 
+
+Table:  cmdb_ci 
+
+Table API endpoint: https://iceserviceportal.servicenowservices.com/api/now/table/cmdb_ci 
+
+ 
+
+Description:  
+
+                 
+
+Data Quality Rules: 
+
+Quarantine record if one or more of the following fields are null 
+
+sys_id 
+
+name 
+
+Quarantine record if one or more of the following fields have duplicates 
+
+sys_id 
+
+Data Profile Report 
+
+snow_configuration_item_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_snow_configuration_item 
+
+Quarantined records: crma_hive.crma_hive_snow_configuration_item_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_snow_configuration_item_warning 
+
+Weakness Tracking Table 
+
+Source system:  ServiceNow 
+
+Table:  x_g_dh5_poam_weakness_tracking   
+
+Table API endpoint: https://iceserviceportal.servicenowservices.com/api/now/table/x_g_dh5_poam_weakness_tracking   
+
+Description:  
+
+The poam Weakness Tracking Table is one stop shop for ISSO to manage Scan Based vulnerability and compliance remediation. GRC (CSAM) automation is also used via this table   
+
+Data Quality Rules: 
+
+ Standardize the following date fields to ISO 8601 format:  
+
+final_capture_date   
+
+identified_date   
+
+poa_m_target_date  
+
+Standardize the following timestamp fields to ISO 8601 timestamp format:   
+
+sys_updated_on 
+
+sys_created_on   
+
+Convert the following numeric fields to Integer 
+
+cat   
+
+mitigated_findings   
+
+port   
+
+sys_mod_count   
+
+total_findings   
+
+Quarantine record if one or more of the following fields are null 
+
+fisma_system_id   
+
+number 
+
+sys_id 
+
+state   
+
+Quarantine record if one or more of the following fields have duplicates  
+
+sys_id 
+
+number   
+
+Add record to warning if one or more of the following fields have null 
+
+fisma_acronym   
+
+security_support_portfolio   
+
+weakness_type   
+
+Data Profile Report 
+
+ snow_weakness_tracking_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_snow_weakness_tracking 
+
+Quarantined records: crma_hive.crma_hive_snow_weakness_tracking_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_snow_weakness_tracking_warning 
+
+ISVM 
+
+Source system:  ServiceNow 
+
+Table: x_g_dh5_poam_isvm 
+
+Table API endpoint: https://iceserviceportal.servicenowservices.com/api/now/table/x_g_dh5_poam_isvm 
+
+Description:  
+
+                        
+
+Data Quality Rules: 
+
+ Standardize the following date fields to ISO 8601 format:  
+
+acknowledgement_due_date   
+
+compliance_due_date   
+
+release_date    
+
+Standardize the following timestamp fields to ISO 8601 timestamp format:   
+
+sys_created_on   
+
+sys_updated_on  
+
+Convert the following numeric fields to Integer 
+
+sys_mod_count   
+
+Remove HTML tags from the following fields 
+
+patch_numbers   
+
+products_and_versions_affected   
+
+Quarantine record if one or more of the following fields are null 
+
+isvm_type   
+
+number   
+
+sys_id 
+
+severity   
+
+Quarantine record if one or more of the following fields have duplicates  
+
+sys_id 
+
+number   
+
+Add record to warning if one or more of the following fields have null 
+
+vendor   
+
+Data Profile Report 
+
+ snow_isvm_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_snow_isvm 
+
+Quarantined records: crma_hive.crma_hive_snow_isvm_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_snow_isvm_warning 
+
+TRM Workbook 
+
+Source system:  MOBIUS 
+
+Table: trm-workbook 
+
+API endpoint base url: https://ea.dhs.gov/nest/data-hub 
+
+Description:  
+
+                                               
+
+Data Quality Rules: 
+
+ Standardize the following date fields to ISO 8601 format:  
+
+status_date 
+
+date_released  
+
+date_endofsupport  
+
+date_retired 
+
+Convert the following numeric fields to Integer 
+
+max_number_of_users 
+
+manufacturer_id  
+
+product_id 
+
+version_id 
+
+governance_id  
+
+fisma_system_id  
+
+Quarantine record if one or more of the following fields are null 
+
+manufacturer 
+
+hardware_software 
+
+manufacturer_id 
+
+product_id 
+
+Add record to warning if one or more of the following fields have null 
+
+status 
+
+Data Profile Report 
+
+ mobius_trm_workbook_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_mobius_trm_workbook 
+
+Quarantined records: crma_hive.crma_hive_mobius_trm_workbook_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_mobius_trm_workbook_warning 
+
+System General Details  
+
+Source system:  CSAM 
+
+Table: systems_general_details_query 
+
+  
+
+Table API endpoint: https://csam.dhs.gov/csam/api/reports/systems_general_details_query 
+
+ 
+
+Description:  
+
+FISMA system information. Includes system identifiers, purpose, implementation details, status, and ownership roles.   
+
+Data Quality Rules: 
+
+ Standardize the following date fields to ISO 8601 format:  
+
+ato_date 
+
+ato_expiration 
+
+authorization_workflow_date 
+
+business_impact_analysis_date_completed 
+
+business_impact_analysis_next_due_date 
+
+contingency_plan_date_completed 
+
+contingency_plan_next_due_date 
+
+contingency_plan_review_date_completed 
+
+contingency_plan_test_date_completed 
+
+contingency_plan_test_next_due_date 
+
+contingency_plan_test_review_date_completed 
+
+contingency_plan_training_date_completed 
+
+contingency_plan_training_next_due_date 
+
+privacy_impact_assessment_date_completed 
+
+Convert the following numeric fields to Integer 
+
+business_impact_analysis_artifacts_loaded 
+
+contingency_plan_artifacts_loaded 
+
+contingency_plan_test_artifacts_loaded 
+
+contingency_plan_training_artifacts_loaded 
+
+days_in_current_status 
+
+number_of_delayed_poams 
+
+number_of_open_approved_poams 
+
+pta_ipa_artifacts_loaded 
+
+privacy_impact_assessment_artifacts_loaded 
+
+Remove HTML tags from the following fields 
+
+system_mission_purpose 
+
+Quarantine record if one or more of the following fields are null 
+
+system_id 
+
+fisma_id 
+
+Quarantine record if one or more of the following fields have duplicates  
+
+system_id 
+
+fisma_id 
+
+Add record to warning if one or more of the following fields have null 
+
+acronym 
+
+system_name 
+
+Data Profile Report 
+
+ csam_system_general_details_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_csam_systems_general_details_query 
+
+Quarantined records: crma_hive.crma_hive_csam_systems_general_details_query_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_csam_systems_general_details_query_warning 
+
+POAM Details  
+
+Source system:  CSAM 
+
+Table: poam_details_report  
+
+Table API endpoint: https://csam.dhs.gov/csam/api/reports/poam_details_report 
+
+Description:  
+
+All current and historical POA&Ms. Includes POA&M root cause, affected system, status, and remediation plan.     
+
+Data Quality Rules: 
+
+ Standardize the following date fields to ISO 8601 format:  
+
+actual_finish_date 
+
+actual_start_date 
+
+assigned_date 
+
+create_date 
+
+planned_finish_date 
+
+planned_start_date 
+
+policy_waiver_expiration 
+
+scheduled_completion_date 
+
+workflow_status_date 
+
+ 
+
+Convert the following numeric fields to Integer 
+
+cost 
+
+days_since_creation 
+
+days_until_auto_approved 
+
+poam_id 
+
+poam_sequence 
+
+system_id 
+
+number_milestones 
+
+number_artifacts 
+
+Quarantine record if one or more of the following fields are null 
+
+poam_id 
+
+system_id 
+
+status 
+
+Quarantine record if one or more of the following fields have duplicates  
+
+poam_id 
+
+Add record to warning  on the given condition 
+
+mililestone = 0 and create_date is later than Jan 01, 2024 
+
+Data Profile Report 
+
+ csam_poam_details_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_csam_poam_details_report 
+
+Quarantined records: crma_hive.crma_hive_csam_poam_details_report_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_csam_poam_details_report_warning 
+
+System Privacy Details  
+
+Source system:  CSAM 
+
+Table: system_privacy_details_report 
+
+Table API endpoint: https://csam.dhs.gov/csam/api/reports/system_privacy_details_report 
+
+ 
+
+Description:  
+
+DHS-defined PII designation for each system. Includes status and indicators for PIA, PTA, and SORN.   
+
+Data Quality Rules: 
+
+ Standardize the following date fields to ISO 8601 format:  
+
+pta_date_completed 
+
+pia_date_completed 
+
+sorn_date_completed 
+
+Convert the following numeric fields to Integer 
+
+system_id 
+
+Quarantine record if one or more of the following fields are null 
+
+system_id 
+
+Quarantine record if one or more of the following fields have duplicates  
+
+system_id   
+
+Add record to warning  if one or more of the following fields are null 
+
+system_name 
+
+acronym 
+
+Data Profile Report 
+
+ csam_system_privacy_details_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_csam_system_privacy_details_report 
+
+Quarantined records: crma_hive.crma_hive_csam_system_privacy_details_report_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_csam_system_privacy_details_report_warning 
+
+System Points of Contact   
+
+Source system:  CSAM 
+
+Table: system_points_of_contact_query 
+
+Table API endpoint: https://csam.dhs.gov/csam/api/reports/system_points_of_contact_query 
+
+ 
+
+ 
+
+Description:  
+
+Contact information for all system ownership roles (e.g. ISSO).   
+
+Data Quality Rules: 
+
+Convert the following numeric fields to Integer 
+
+system_id 
+
+Quarantine record if one or more of the following fields are null 
+
+system_id  
+
+Add record to warning  if one or more of the following fields are null 
+
+system_name 
+
+acronym 
+
+Data Profile Report 
+
+ csam_system_points_of_contact_details_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_csam_system_points_of_contact_query 
+
+Quarantined records: crma_hive.crma_hive_csam_system_points_of_contact_query_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_csam_system_points_of_contact_query_warning 
+
+Devices  
+
+Source system:  Axnius 
+
+Table: devices 
+
+Table API endpoint: https://axonius.ice.dhs.gov/api/v2/ assets/devices 
+
+Description:  
+
+                             
+
+Data Quality Rules: 
+
+Convert the following numeric fields to Integer 
+
+adapter_list_length 
+
+Standardize the following date fields to ISO 8601 format:   
+
+devices_first_seen 
+
+devices_last_seen 
+
+Quarantine record if one or more of the following fields are null 
+
+internal_axon_id 
+
+Quarantine record if one or more of the following fields have duplicates  
+
+internal_axon_id 
+
+Add record to warning  if one or more of the following fields are null 
+
+adapters 
+
+devices_enrichment_u_fisma_id 
+
+devices_hostname 
+
+ 
+
+Data Profile Report 
+
+axonius_devices_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_axonius_devices 
+
+Quarantined records: crma_hive.crma_hive_axonius_devices_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_axonius_devices_warning 
+
+Software  
+
+Source system:  Axnius 
+
+Table: devices 
+
+Table API endpoint: https://axonius.ice.dhs.gov/api/v2/ assets/software 
+
+Description:  
+
+                             
+
+Data Quality Rules: 
+
+Convert the following numeric fields to Integer 
+
+devices_count 
+
+Standardize the following date fields to ISO 8601 format:   
+
+software_last_used_date 
+
+Quarantine record if one or more of the following fields are null 
+
+internal_axon_id 
+
+software_id 
+
+Quarantine record if one or more of the following fields have duplicates  
+
+internal_axon_id 
+
+Add record to warning  if one or more of the following fields are null 
+
+adapters 
+
+ 
+
+Data Profile Report 
+
+axonius_software_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_axonius_software 
+
+Quarantined records: crma_hive.crma_hive_axonius_software_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_axonius_software_warning 
+
+Vulnerablitity findings  
+
+Source system:  Tenable VM 
+
+Table: vulns 
+
+Table API endpoints 
+
+Expoort endpoint: POST: https://fedcloud.tenable.com/vulns/export 
+
+Get export status: GET: https://fedcloud.tenable.com/vulns/export/{export_uuid}/status 
+
+Download: GET: https://fedcloud.tenable.com/vulns/export/{export_uuid}/chunks/{chunk_id} 
+
+Filters: 
+
+            "payload": { 
+
+                "filters": { 
+
+                    "severity": ["low", "medium", "high", "critical"], 
+
+                    "state": ["OPEN", "REOPENED", "FIXED" ], 
+
+                },             
+
+            "num_assets": 1500 
+
+            }    
+
+ 
+
+Description:  
+
+The Vulnerability Findings dataset lists identified security vulnerabilities on assets, including vulnerability IDs, severity ratings, affected assets, discovery dates, and current remediation status.   
+
+ 
+
+Data Quality Rules: 
+
+Convert the following numeric fields to Integer 
+
+severity_id 
+
+plugin_id 
+
+port_port 
+
+Standardize the following timestamp fields to ISO 8601 format:   
+
+first_found 
+
+last_found 
+
+last_fixed 
+
+indexed 
+
+resurfaced_date 
+
+Quarantine record if one or more of the following fields are null 
+
+asset_uuid 
+
+finding_id 
+
+first_found  
+
+indexed 
+
+last_found  
+
+plugin_id 
+
+port_port 
+
+port_protocol 
+
+scan_uuid 
+
+ state    
+
+Quarantine record if one or more of the following fields contains duplicates 
+
+finding_id 
+
+Data Profile Report 
+
+tvm_vuln_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_tvm_vulns 
+
+Quarantined records: crma_hive.crma_hive_tvm_vulns_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_tvm_vulns_warning 
+
+Historical data: crma_hive.crma_hive_tvm_vulns_hist 
+
+Aggregate metrics: crma_hive.crma_hive_tvm_vulns_agg_hist 
+
+CISCO Vulnerablitity findings  
+
+Source system:  Tenable VM 
+
+Table: vulns 
+
+Table API endpoints 
+
+Expoort endpoint: POST: https://fedcloud.tenable.com/vulns/export 
+
+Get export status: GET: https://fedcloud.tenable.com/vulns/export/{export_uuid}/status 
+
+Download: GET: https://fedcloud.tenable.com/vulns/export/{export_uuid}/chunks/{chunk_id} 
+
+Filters: 
+
+"payload": { 
+
+                "filters": { 
+
+                    "severity": ["low", "medium", "high", "critical"], 
+
+                    "state": ["OPEN", "REOPENED", "FIXED" ], 
+
+                    "tag.AXONIUS FISMA ID": ["ICE-06560-GSS-06560", "ICE-07999-SUB-06560",  
+
+                        "ICE-08002-SUB-06560", "ICE-08004-SUB-06560", "ICE-08006-SUB-06560", "ICE-08007-SUB-06560"],   # CISCO icon 
+
+                },             
+
+            "num_assets": 2500 
+
+ 
+
+ 
+
+Description:  
+
+The Vulnerability Findings dataset lists identified security vulnerabilities on assets, including vulnerability IDs, severity ratings, affected assets, discovery dates, and current remediation status.   
+
+ 
+
+Data Quality Rules: 
+
+Convert the following numeric fields to Integer 
+
+severity_id 
+
+plugin_id 
+
+port_port 
+
+Standardize the following timestamp fields to ISO 8601 format:   
+
+first_found 
+
+last_found 
+
+last_fixed 
+
+indexed 
+
+resurfaced_date 
+
+Quarantine record if one or more of the following fields are null 
+
+asset_uuid 
+
+finding_id 
+
+first_found  
+
+indexed 
+
+last_found  
+
+plugin_id 
+
+port_port 
+
+port_protocol 
+
+scan_uuid 
+
+ state    
+
+Quarantine record if one or more of the following fields contains duplicates 
+
+finding_id 
+
+ 
+
+Data Profile Report 
+
+tvm_vuln_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_cisco_hive_tvm_vulns 
+
+Quarantined records: crma_hive.crma_hive_tvm_cisco_vulns_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_tvm_cisco_vulns_warning 
+
+Historical data: crma_hive.crma_hive_tvm_cisco_vulns_hist 
+
+Aggregate metrics: crma_hive.crma_hive_tvm_cisco_vulns_agg_hist 
+
+Plugin 19506 Vulnerablitity findings  
+
+Source system:  Tenable VM 
+
+Table: vulns 
+
+Table API endpoints 
+
+Expoort endpoint: POST: https://fedcloud.tenable.com/vulns/export 
+
+Get export status: GET: https://fedcloud.tenable.com/vulns/export/{export_uuid}/status 
+
+Download: GET: https://fedcloud.tenable.com/vulns/export/{export_uuid}/chunks/{chunk_id} 
+
+Filters: 
+
+"payload": { 
+
+                "filters": { 
+
+                    "plugin_id": [19506] 
+
+                },             
+
+            "num_assets": 2500 
+
+            }         
+
+ 
+
+Description:  
+
+Info plugin dataset that provides metadata about scanning process. In HIVE it is utilized to get   credential check status of assets. 
+
+ 
+
+Data Quality Rules: 
+
+Quarantine record if one or more of the following fields are null 
+
+asset_uuid 
+
+finding_id 
+
+ouput 
+
+Quarantine record if one or more of the following fields contains duplicates 
+
+finding_id 
+
+ 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive_tvm_plugin_19506_vulns 
+
+Compliance 
+
+Source system:  Tenable VM 
+
+Table: vulns 
+
+Table API endpoints 
+
+Expoort endpoint: POST: https://fedcloud.tenable.com/compliance/export 
+
+Get export status: GET: https://fedcloud.tenable.com/compliance/export/{export_uuid}/status 
+
+Download: GET: https://fedcloud.tenable.com/compliance/export/{export_uuid}/chunks/{chunk_id} 
+
+Description:  
+
+The Compliance dataset tracks the adherence of assets to security policies and standards, documenting compliance checks, test results, non-compliance issues, and remediation status. 
+
+Data Quality Rules: 
+
+Convert the following numeric fields to Integer 
+
+plugin_id 
+
+Standardize the following timestamp fields to ISO 8601 format:   
+
+first_seen 
+
+last_seen 
+
+last_fixed 
+
+last_observed 
+
+Quarantine record if one or more of the following fields are null 
+
+first_seen 
+
+Last_seen 
+
+state 
+
+status 
+
+compliance_full_id 
+
+asset_id 
+
+  
+
+ 
+
+Data Profile Report 
+
+tvm_compliance_data_profile_report.docx  
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_tvm_compliance 
+
+Quarantined records: crma_hive.crma_hive_tvm_compliance_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_tvm_compliance_warning 
+
+Assets  
+
+Source system:  Tenable VM 
+
+Table: vulns 
+
+Table API endpoints 
+
+Expoort endpoint: GET: https://fedcloud.tenable.com/assets/v2/export 
+
+Get export status: GET: https://fedcloud.tenable.com/assets/export/{export_uuid}/status 
+
+Download: GET: https://fedcloud.tenable.com/assets/export/{export_uuid}/chunks/{chunk_id} 
+
+Filters: 
+
+        "payload": { 
+
+                "filters": {}, 
+
+                "chunk_size": 10000 
+
+            } 
+
+ 
+
+Description:  
+
+The Assets dataset catalogs all IT assets managed within the environment, providing key information like asset IDs, hostnames, IP addresses, ownership, location, and asset scan infomation, etc. 
+
+Data Quality Rules: 
+
+Normalize boolean fields 
+
+has_agent 
+
+has_plugin_results 
+
+is_licensed 
+
+is_licensed 
+
+Standardize the following timestamp fields to ISO 8601 format:   
+
+scan_first_scan_time 
+
+scan_last_authentication_attempt_date 
+
+scan_last_authentication_success_date 
+
+scan_last_scan_time 
+
+timestamps_created_at 
+
+timestamps_first_seen 
+
+timestamps_last_seen 
+
+timestamps_updated_at 
+
+ 
+
+ 
+
+Quarantine record if one or more of the following fields are null 
+
+id 
+
+Quarantine record if one or more of the following fields has duplicates  
+
+id 
+
+ 
+
+Data Profile Report 
+
+tvm_assets_data_profile_report.docx 
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_tvm_assets 
+
+Quarantined records: crma_hive.crma_hive_tvm_assets_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_tvm_assets_warning 
+
+Scans 
+
+Source system:  Tenable VM 
+
+Table: vulns 
+
+Table API endpoints 
+
+Expoort endpoint: GET: https://fedcloud.tenable.com/scans 
+
+Description:  
+
+Scan dataset contains records of vulnerability management scans performed on IT assets, including details such as scan date, scan type, asset identifiers, and overall scan results. 
+
+ 
+
+Data Quality Rules: 
+
+Convert the following numeric fields to Integer 
+
+id 
+
+creation_date 
+
+last_modification_date 
+
+policy_id 
+
+permissions 
+
+user_permissions 
+
+total_targets 
+
+status_times_initializing 
+
+status_times_pending 
+
+status_times_processing 
+
+status_times_publishing  
+
+status_times_running 
+
+status_times_stopping 
+
+incomplete_targets 
+
+Convert the following numeric fields to float 
+
+progress	  
+
+Normalize boolean fields 
+
+control 
+
+enabled 
+
+legacy 
+
+read 
+
+shared 
+
+has_triggers 
+
+ 
+
+Standardize the following timestamp fields to ISO 8601 format:   
+
+scan_first_scan_time 
+
+scan_last_authentication_attempt_date 
+
+scan_last_authentication_success_date 
+
+scan_last_scan_time 
+
+timestamps_created_at 
+
+timestamps_first_seen 
+
+timestamps_last_seen 
+
+timestamps_updated_at 
+
+ 
+
+Quarantine record if one or more of the following fields are null 
+
+id 
+
+Quarantine record if one or more of the following fields has duplicates  
+
+id 
+
+ 
+
+Data Profile Report 
+
+  tvm_scans_data_profile_report.docx    
+
+Mapped to tables in target database: 
+
+Clean: crma_hive.crma_hive_tvm_scans 
+
+Quarantined records: crma_hive.crma_hive_tvm_scans_quarantine 
+
+Records with warning flags: crma_hive.crma_hive_tvm_scans_warning 
+
+ KEV Catalogue 
+
+Source system:  CISA 
+
+Table API endpoints 
+
+Expoort endpoint: https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json 
+
+Description:  
+
+The CISA KEV (Known Exploited Vulnerabilities) catalogue is a dataset maintained by the Cybersecurity and Infrastructure Security Agency that lists vulnerabilities observed to be actively exploited in the wild. It includes vulnerability identifiers, descriptions, affected products, exploitation details, and remediation deadlines, helping organizations prioritize patching and mitigation efforts for high-risk vulnerabilities. 
+
+Mapped to tables in target database: 
+
+Table: crma_hive.crma_hive_cisa_kev_catalog 
+
+NVD CVE Scores 
+
+Source system:  NVD 
+
+Table API endpoints 
+
+Expoort endpoint: https://services.nvd.nist.gov/rest/json/cves/2.0 
+
+Description:  
+
+The NVD CVE scores dataset, maintained by the National Vulnerability Database, provides standardized severity ratings for publicly disclosed cybersecurity vulnerabilities (CVEs). It includes CVE identifiers, vulnerability descriptions, CVSS (Common Vulnerability Scoring System) scores, impact metrics, and references, enabling organizations to assess and prioritize vulnerability risks based on severity and exploitability. 
+
+Mapped to tables in target database: 
+
+Table: crma_hive.crma_hive_cve_score_kev_info_combined 
+
+Derived Datasets 
+
+POAM Controls: 
+
+Description 
+
+This dataset breaks out the NIST 800-53 controls that are tied to POA&Ms, ensuring we can accurately assess our risk as it pertains to STIG Configurations.                             
+
+Data Source:  
+
+Table : crma_hive.crma_hive_snow_poam_data 
+
+Source fields: poam_id, controls  
+
+Output fields: 
+
+poam_id 
+
+contol 
+
+etl_date 
+
+Mapped to tables in target database: 
+
+crma_hive.crma_hive_snow_poam_controls 
+
+POAM Csfcategory: 
+
+Description 
+
+This table ties our POAMs to the 2.0 CyberSecurity Framework as mapped to NIST 800-53 controls. It will allow us to derive a CSF score, which is increasingly being used to determine security compliance posture.  
+
+Data Source:  
+
+Table : crma_hive.crma_hive_snow_poam_data 
+
+Source fields: poam_id, csfcategory 
+
+Output fields: 
+
+poam_id  
+
+csfcategory 
+
+etl_date 
+
+Mapped to tables in target database: 
+
+crma_hive.crma_hive_snow_poam_csfcategory 
+
+POAM ISSO Status: 
+
+Description 
+
+ISSO Status history tracks required Monthly updates to POA&Ms, ensuring they are being managed and tracked to completion. All POA&Ms require these updates and dashboarding them will allow quicker access to see POA&M statuses and blockers.                        
+
+Data Source:  
+
+Table : crma_hive.crma_hive_snow_poam_data 
+
+Source fields: poam_id, isso_status_history 
+
+Output fields: 
+
+poam_id 
+
+isso_status_update_date 
+
+updated_by 
+
+isso_status 
+
+etl_date 
+
+Mapped to tables in target database: 
+
+crma_hive.crma_hive_snow_poam_isso_status 
+
+Tables that maintain hsitorical data  
+
+POAM Audit Controls: 
+
+Description 
+
+This dataset maitains hostorical data of poam audit controls for Audit Controls tredoing dashboard                             
+
+Data Source:  
+
+Tables :  
+
+crma_hive.crma_hive_snow_poam_audit; 
+
+crma_hive.crma_hive_snow_poam_data; 
+
+crma_hive.crma_hive_csam_poam_details_report 
+
+crma_hive.crma_hive_csam_systems_general_details_query 
+
+Fields: poam_id, poam_title, status, system_name, system_id, acronym, portfolio, audit_year, audit_type, domain_control_family, audit_controls,     actual_start_date  date, actual_finish_date, detailed_weakness_description, create_date, user_identified_criticality, item_identified_during, accepted_risk, scheduled_completion_date, assigned_to, isso_name, isso_email         
+
+Mapped to tables in target database: 
+
+crma_hive.crma_hive_poam_audit_controls_hist 
+
+ 
+
+FISMA Scorecard Metrics withi HIVE implmentation 
+
+Implemented Metrics  
+
+Vulnerablity Managment (VM) 
+
+Configuration Managment (CM) 
+
+Software Asset Managment (SWAM) 
+
+Hardware Asset Management (HWAM) 
+
+Host-based Defense (HBD) 
+
+Prohibited Operating Systems 
+
+Security Authorization  
+
+FISMA Scorecard metrics tables in crma_hive 
+
+Device score tables 
+
+crma_hive.crma_hive_fismascorecard_device_cm_score 
+
+crma_hive.crma_hive_fismascorecard_device_hbd_score 
+
+crma_hive.crma_hive_fismascorecard_device_prohibited_os_score 
+
+crma_hive.crma_hive_fismascorecard_device_swam_score 
+
+crma_hive.crma_hive_fismascorecard_device_vm_score 
+
+FISMA System score tables: 
+
+crma_hive.crma_hive_fismascorecard_fisma_system_cm_score 
+
+crma_hive.crma_hive_fismascorecard_fisma_system_hbd_score 
+
+crma_hive.crma_hive_fismascorecard_fisma_system_hwam_score 
+
+crma_hive.crma_hive_fismascorecard_fisma_system_prohibited_os_score 
+
+crma_hive.crma_hive_fismascorecard_fisma_system_security_authz_score 
+
+crma_hive.crma_hive_fismascorecard_fisma_system_swam_score 
+
+crma_hive.crma_hive_fismascorecard_fisma_system_vm_score 
+
+crma_hive.crma_hive_fismascorecard_fisma_system_all_metrics_scores 
+
+Organization score tables  
+
+crma_hive.crma_hive_fismascorecard_component_hwam_score 
+
+crma_hive.crma_hive_fismascorecard_component_scores 
+
+Technical documentation 
+
+See: FIFSMA Scorecard Metrics HIVE Implementation Technical Documentation.docx 
+
+ 
+
+ERD Diagram of  CRMA HIVE SNOW tables 
+
+Follow link to view ERD Diagram:  crma_hive_ERD_diagram.svg 
+
+Snapshot of  CRMA HIVE Databases (Date:07/16/2026) 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+Completed tasks and  achieved milestones 
+
+So far 5 independent ETL pipeline has been successfully deployed in the AWS cloud environment, leveraging managed services for scalability and reliability. Key milestones include: 
+
+Infrastructure Setup: 
+
+Provisioned infrastructure using Terraform for automated, consistent deployments.  
+
+Integrated Jenkins for CI/CD workflows and GitHub for source code management, enabling version control, collaboration, and automated testing. 
+
+Pipeline Development: 
+
+Raw Data Ingestion: Implemented Glue jobs to ingest external data into Amazon S3 in Parquet format for efficient storage and processing. 
+
+Data Processing and Classification: Developed Glue jobs to clean, enrich, and classify records into clean, quarantined, and warning categories based on data quality and business rules. 
+
+Data Loading: Designed a robust loading strategy for the target RDS database, ensuring referential integrity through staged tables, orphan record handling, and deferred constraint checks. 
+
+Derived Data Generation: Created Glue jobs to normalize and generate derived datasets from clean data, meeting specific business requirements. 
+
+Data Storage and Archival: 
+
+Utilized Amazon S3 buckets for raw and processed data storage. 
+
+Enabled long-term data archival of raw and processed data in Amazon Glacier for historical retention leveraging S3 lifecycle rules.  
+
+Testing and Code Optimization: 
+
+Developed unit tests with at least 80% coverage to ensure reliability and correctness of pipeline components. 
+
+Conducted revisions and continuous code enhancements to improve performance, reliability, and processing time, 
+
+Security and Credential Management: 
+
+Integrated AWS Secrets Manager to securely store credentials for external APIs, S3 buckets, and the target RDS database. 
+
+Implemented security scanning as part of the CI/CD process to identify and mitigate vulnerabilities. 
+
+ 
+
+Workflow Optimization: 
+
+Established a reliable pipeline workflow with error handling, rollback mechanisms, and materialized view refresh processes to ensure data integrity and seamless operations 
+
+Configured job status notifications using Amazon EventBridge and SNS to alert team members 
+
+7. Onboarded Datasets: 
+
+ To date, succesfuly onboarded the follwing datasets from  
+
+ServiceNow: 
+
+FISMA Inventory 
+
+POAM Data 
+
+POAM Audit 
+
+Programs 
+
+Sys User 
+
+ITSR(Request) 
+
+Change Request 
+
+Configuration Item 
+
+Weakness Tracking Table 
+
+ISVM 
+
+Mobius: 
+
+TRM Workbook 
+
+CSAM: 
+
+Systems General Details 
+
+POAM Details 
+
+System Privacy Details 
+
+System Points of Contact 
+
+Axonius: 
+
+Devices 
+
+Software 
+
+Tenable VM 
+
+Vulnerablity Findinngs 
+
+Compliance 
+
+Assets 
+
+Scans 
+
+Policies 
+
+CISA 
+
+KEV Calalogue 
+
+NVD 
+
+CVEs 
+
+Actions Taken for Each Dataset: 
+
+Initial Exploration: Conducted thorough exploration of the dataset, its data source, API endpoints and API endpoint parameters,to understand its structure, format, and accessibility. 
+
+Data Profiling and Documentation: Performed extensive data profiling and modeling to analyze dataset characteristics, generating detailed data profile documents for reference. 
+
+Defining Rules: Defined and documented data quality standards and business rules specific to each dataset, ensuring compliance with organizational requirements. 
+
+Ingestion: Ingested datasets into the pipeline leveraging the ServiceNow table API endpoints and their parameters.  
+
+Cleaning, Enriching, and Classification: Applied cleaning, enrichment, and classification processes to ensure data quality and categorize records into clean, quarantined, and warning classifications. 
+
+Data Modeling: Developed detailed data models and ERD diagrams to represent relationships between related datasets and support downstream applications. 
+
+Loading to Target: Loaded datasets into the target RDS database while preserving relational integrity and adhering to constraints, using a staged loading approach to ensure compliance. 
+
+7. FISMA Scorecard Metrics Implmentation 
+
+Completemed within CRMA HIVE computation of VM, CM, SWAM, HWAM, HBD, Prohibited OSs, and Security Authorizations scores. 
+
+Current Focus  
+
+The team is currently focused on the following key areas to ensure the ETL pipeline remains robust, efficient, and aligned with evolving business needs. 
+
+FISMA Scorecard  
+
+Internal validation 
+
+Design robust solution fo TVM-to-Mobius data mapping for updating scorecard reference tables  
+
+System Enhancements:  
+
+Continuously improving the pipeline's performance, reliability to handle increasing data volume,  and ensure optimal resource utilization. 
+
+Supporting Downstream Business Requirements: 
+
+Preparing and transforming data to meet the specific needs of downstream applications and analytics, including generating derived datasets, updating data models, and ensuring data availability for bussiness-critical processes. 
+
+System Monitoring and Upgrades: 
+
+Monitoring the pipeline for any performance bottlenecks or security vulnerabilities, addressing issues proactively, and upgrading components as necessary to maintain system integrity and reliability. 
+
+Source Code Documentation:  
+
+Update project Overview, Milestones, and Roadmap documentation  
+
+Update and enhance source code documentation to ensure clarity, maintainability, and usability. 
+
+Planned Actions 
+
+Onboarding New Datasets: 
+
+We plan to onboard the following datasets 
+
+Invicti: Web scans data 
+
+QCT metrics 
+
+ZTA flat files 
+
+Jira: ATO Stage Gates + RMF Tracker (useful, but not priority) 
+
+Axonius: Active Directory user data 
+
+CSAT: Employee training completion (pending ITPM review) 
+
+Wiz: Cloud metrics and reporting data (pending ITPM review/enterprise rollout) 
+
+CSAM: artifact ingestion 
+
+Re-implement Weakness Tracking table in HIVE?? 
+
+Refine KEV compliance logic 
+
+Supporting Downstream Business Requirements: 
+
+Continue to prepare and transform data to address the evolving needs of downstream applications and analytics. 
+
+Make a concerted effort to better understand the specific requirements of downstream applications, enabling the preparation of data that is more aligned with their needs and enhances their functionality. 
+
+Collaborate with stakeholders to identify additional data requirements and incorporate them into the pipeline. 
+
+ Blockers 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 
